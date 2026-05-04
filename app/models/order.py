@@ -5,7 +5,24 @@ from sqlalchemy import String, Text, DateTime, ForeignKey, Numeric, Integer, tex
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from enum import Enum
+from sqlalchemy import Enum as SqlEnum
 
+
+
+
+class OrderStatus(str, Enum):
+    PROCESSING = "processing"
+    MANIFESTED = "manifested"
+    IN_TRANSIT = "in_transit"
+    NDR = "ndr"
+    OFD = "ofd"
+    DELIVERED = "delivered"
+    RTO_IN_TRANSIT = "rto_in_transit"
+    RTO_DELIVERED = "rto_delivered"
+    RETURNED = "returned"
+    CANCELLED = "cancelled"
+    LOST = "lost"
 
 class Order(Base):
     __tablename__ = "orders"
@@ -50,7 +67,12 @@ class Order(Base):
     barcode: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status
-    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'pending'"))
+    # status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'pending'"))
+    status: Mapped[OrderStatus] = mapped_column(
+                SqlEnum(OrderStatus),
+                nullable=False,
+                default=OrderStatus.PROCESSING
+            )
 
     # Ownership
     created_by: Mapped[str] = mapped_column(
