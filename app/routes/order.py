@@ -8,8 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
+
 from app.models.order import Order,OrderItem,OrderPackage
 from app.models.warehouse import WareHouseAddress
+
+from app.models.order import OrderStatus
+
 from app.schemas.order import (
     PickupAddressCreate,
     PickupAddressOut,
@@ -20,7 +24,9 @@ from app.schemas.order import (
     OrderCreate,
     OrderOut,
     OrderListResponse,
-    LocationRequest
+    LocationRequest,
+    OrderStatusListResponse,
+
 )
 from app.services.order_service import (
     search_pickup_addresses,
@@ -30,6 +36,7 @@ from app.services.order_service import (
     create_order,
     list_orders,
     get_order,
+    get_filtered_orders_service
 )
 
 from sqlalchemy.orm import Session
@@ -127,6 +134,22 @@ async def list_orders_endpoint(
         db, current_user, page=page, limit=limit,
         search=search, status_filter=status, order_type=order_type,
     )
+
+@router.get("/status", response_model=OrderStatusListResponse)
+async def get_filtered_orders_endpoint(
+    status: Optional[OrderStatus] = Query(None),
+    limit: int = Query(10, le=100),
+    offset: int = Query(0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    total, orders = await get_filtered_orders_service(db, status, limit, offset)
+
+    return {
+        "total": total,
+        "status_filter": status,
+        "data": orders
+    }
 
 
 
@@ -486,12 +509,12 @@ async def get_pincode_from_gps(
 
         pickup_to_consignee = PickupToConsignees(
             pincode=pickup.pincode,
-            status="Picked",
+            status=OrderStatus.PICKED,
             order_id=order.id,
             pickup_addresses_id=pickup.id,
         )
         db.add(pickup_to_consignee)
-        order.status = "Picked"
+        order.status = OrderStatus.PICKED
 
         await db.commit()
         await db.refresh(pickup_to_consignee)
@@ -522,12 +545,12 @@ async def get_pincode_from_gps(
 
         pickup_to_consignee = WarehouseToDelivery(
             pincode=warehouseaddress.pincode,
-            status="Dispatched",
+            status=OrderStatus.DISPATCHED,
             order_id=order.id,
             warehouse_addresses_id=warehouseaddress.id,
         )
         db.add(pickup_to_consignee)
-        order.status = "Dispatched"
+        order.status = OrderStatus.DISPATCHED
 
         await db.commit()
         await db.refresh(pickup_to_consignee)
@@ -561,18 +584,18 @@ async def get_pincode_from_gps(
         
         consignee_to_delivery = ConsigneeToDelivery(
             pincode=consignee.pincode,
-            status="Delivered",
+            status=OrderStatus.DELIVERED,
             order_id=order.id,
             consignee_id=consignee.id,
         )
         db.add(consignee_to_delivery)
-        order.status = "Delivered"
+        order.status = OrderStatus.DELIVERED
 
         await db.commit()
         await db.refresh(consignee_to_delivery)
 
         return {
-            "stage": "delivery",
+            "stage": "Delivery",
             "order_id": order.id,
             "order_number": order.order_number,
             "order_status": order.status,
