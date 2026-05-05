@@ -163,6 +163,7 @@ class OrderCreate(BaseModel):
     order_type: OrderType
     pickup_address_id: str
     consignee_id: str
+    warehouse_addresses_id:str
 
     payment_method: PaymentMethod
     cod_amount: Optional[float] = Field(None, ge=0, description="Required when payment_method is COD")
@@ -231,3 +232,9 @@ class OrderListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+
+class LocationRequest(BaseModel):
+    lat: float
+    lng: float
