@@ -272,8 +272,8 @@ async def create_order(
     warehouse_addresses= (
         await db.execute(select(WareHouseAddress).where(WareHouseAddress.id == data.warehouse_addresses_id))
     ).scalar_one_or_none()
-    if not warehouse_addresses:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Warehouse not found")
+    # if not warehouse_addresses:
+    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Warehouse not found")
 
     franchise_id = await _resolve_franchise_id(db, current_user)
     order_number = await _generate_order_number(db)
