@@ -161,7 +161,11 @@ class ConsigneeToDelivery(Base):
 
     order = relationship("Order", backref="consignees_to_delivery")
     consignee = relationship("Consignee", backref="consignees_to_delivery")
-
+    
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True) 
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,onupdate=datetime.utcnow,nullable=False)
 
     
 class PickupToConsignees(Base):
@@ -175,7 +179,11 @@ class PickupToConsignees(Base):
     pickup_addresses_id = Column(String(36), ForeignKey("pickup_addresses.id", ondelete="CASCADE"))
 
     order = relationship("Order", backref="pickup_to_consignees")
-    pickup_address = relationship("PickupAddress", backref="pickup_to_consignees")  
+    pickup_address = relationship("PickupAddress", backref="pickup_to_consignees") 
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True) 
+    created_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,onupdate=datetime.utcnow,nullable=False)
+ 
     
     
 class WarehouseToDelivery(Base):
@@ -189,5 +197,8 @@ class WarehouseToDelivery(Base):
     warehouse_addresses_id = Column(String(36), ForeignKey("warehouse_addresses.id", ondelete="CASCADE"))
 
     order = relationship("Order", backref="warehouse_to_delivery")
-    warehouse_address = relationship("WareHouseAddress", backref="warehouse_to_delivery")  
+    warehouse_address = relationship("WareHouseAddress", backref="warehouse_to_delivery") 
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True) 
+    created_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime,default=datetime.utcnow,onupdate=datetime.utcnow,nullable=False)
     
