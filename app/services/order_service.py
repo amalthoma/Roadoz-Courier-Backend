@@ -19,6 +19,7 @@ from app.services.wallet_service import debit_for_order
 from app.utils.barcode import generate_barcode_base64
 from app.schemas.order import (
     PickupAddressCreate,
+    PickupAddressUpdate,
     PickupAddressOut,
     PickupAddressListResponse,
     ConsigneeCreate,
@@ -183,11 +184,83 @@ async def create_pickup_address(
         city=data.city,
         state=data.state,
         country=data.country,
+        active=data.active,
+        is_primary=data.is_primary,
     )
     db.add(addr)
     await db.flush()
     await db.refresh(addr)
     return PickupAddressOut.model_validate(addr)
+
+
+async def update_pickup_address(
+    db: AsyncSession, address_id: str, data: PickupAddressUpdate, current_user: User
+) -> PickupAddressOut:
+    result = await db.execute(select(PickupAddress).where(PickupAddress.id == address_id))
+    addr = result.scalar_one_or_none()
+    if not addr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and addr.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and addr.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if data.nickname is not None:
+        addr.nickname = data.nickname
+    if data.contact_name is not None:
+        addr.contact_name = data.contact_name
+    if data.phone is not None:
+        addr.phone = data.phone
+    if data.email is not None:
+        addr.email = data.email
+    if data.address_line_1 is not None:
+        addr.address_line_1 = data.address_line_1
+    if data.address_line_2 is not None:
+        addr.address_line_2 = data.address_line_2
+    if data.pincode is not None:
+        addr.pincode = data.pincode
+    if data.city is not None:
+        addr.city = data.city
+    if data.state is not None:
+        addr.state = data.state
+    if data.country is not None:
+        addr.country = data.country
+    if data.active is not None:
+        addr.active = data.active
+    if data.is_primary is not None:
+        addr.is_primary = data.is_primary
+
+    await db.flush()
+    await db.refresh(addr)
+    return PickupAddressOut.model_validate(addr)
+
+
+async def delete_pickup_address(
+    db: AsyncSession, address_id: str, current_user: User
+) -> None:
+    result = await db.execute(select(PickupAddress).where(PickupAddress.id == address_id))
+    addr = result.scalar_one_or_none()
+    if not addr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and addr.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and addr.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Check if address is linked to any order
+    order_exists = await db.scalar(select(Order.id).where(Order.pickup_address_id == addr.id).limit(1))
+    if order_exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete pickup address because it is associated with one or more orders."
+        )
+
+    await db.delete(addr)
+    await db.flush()
 
 
 # ── Consignee ──────────────────────────────────────────────────────────────
@@ -313,6 +386,14 @@ async def delete_consignee(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     elif not franchise_id and consignee.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Check if consignee is linked to any order
+    order_exists = await db.scalar(select(Order.id).where(Order.consignee_id == consignee.id).limit(1))
+    if order_exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete consignee because it is associated with one or more orders."
+        )
 
     await db.delete(consignee)
     await db.flush()
