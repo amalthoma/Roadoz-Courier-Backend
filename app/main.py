@@ -10,8 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.security import get_password_hash
-from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
-from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse
+from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
+from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log
+from app.models.activity_log import ActivityLog
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -106,6 +107,8 @@ DEFAULT_PERMISSIONS = [
     # Invoices
     ("invoices", "view", "View invoices"),
     ("invoices", "generate", "Admin: generate and manage invoices"),
+    # Activity Logs
+    ("activity_logs", "view", "View activity logs"),
 ]
 
 
@@ -253,6 +256,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ActivityLoggingMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 
@@ -266,6 +270,7 @@ app.include_router(order.router,    prefix=API_PREFIX)
 app.include_router(wallet.router,   prefix=API_PREFIX)
 app.include_router(remittance.router, prefix=API_PREFIX)
 app.include_router(invoice.router,   prefix=API_PREFIX)
+app.include_router(activity_log.router, prefix=API_PREFIX)
 app.include_router(websocket.router)
 app.include_router(warehouse.router)
 

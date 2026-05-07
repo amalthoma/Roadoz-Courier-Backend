@@ -16,6 +16,7 @@ from app.models.order import OrderStatus
 
 from app.schemas.order import (
     PickupAddressCreate,
+    PickupAddressUpdate,
     PickupAddressOut,
     PickupAddressListResponse,
     ConsigneeCreate,
@@ -34,6 +35,8 @@ from app.schemas.order import (
 from app.services.order_service import (
     search_pickup_addresses,
     create_pickup_address,
+    update_pickup_address,
+    delete_pickup_address,
     search_consignees,
     create_consignee,
     update_consignee,
@@ -93,6 +96,28 @@ async def create_pickup_address_endpoint(
     _: User = Depends(require_permission("pickup_addresses:create")),
 ):
     return await create_pickup_address(db, data, current_user)
+
+
+@router.put("/pickup-addresses/{address_id}", response_model=PickupAddressOut)
+async def update_pickup_address_endpoint(
+    address_id: str,
+    data: PickupAddressUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("pickup_addresses:create")),
+):
+    return await update_pickup_address(db, address_id, data, current_user)
+
+
+@router.delete("/pickup-addresses/{address_id}", status_code=204)
+async def delete_pickup_address_endpoint(
+    address_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("pickup_addresses:create")),
+):
+    await delete_pickup_address(db, address_id, current_user)
+    return Response(status_code=204)
 
 
 # â”€â”€ Consignees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
