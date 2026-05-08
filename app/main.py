@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.security import get_password_hash
+from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
+from app.routes import auth, franchise, orderreview,projectreview , profile, websocket, rbac, order, wallet, remittance, invoice,warehous
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
 from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log
 from app.models.activity_log import ActivityLog
@@ -273,6 +275,10 @@ app.include_router(invoice.router,   prefix=API_PREFIX)
 app.include_router(activity_log.router, prefix=API_PREFIX)
 app.include_router(websocket.router)
 app.include_router(warehouse.router)
+app.include_router(orderreview.router)
+app.include_router(projectreview.router)
+
+
 
 
 @app.get("/", tags=["Health"])
