@@ -963,6 +963,7 @@ async def list_orders(
 
     query = (
         select(Order)
+        .join(Consignee, Order.consignee_id == Consignee.id)
         .where(and_(*filters))
         .order_by(Order.created_at.desc())
     )
@@ -972,6 +973,7 @@ async def list_orders(
     count_query = (
         select(func.count())
         .select_from(Order)
+        .join(Consignee, Order.consignee_id == Consignee.id)
         .where(and_(*filters))
     )
 
@@ -996,6 +998,8 @@ async def list_orders(
             Order.status,
             func.count(Order.id)
         )
+        .select_from(Order)
+        .join(Consignee, Order.consignee_id == Consignee.id)
         .where(and_(*filters))
         .group_by(Order.status)
     )
