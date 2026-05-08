@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, ForeignKey, text
+from sqlalchemy import String, DateTime, ForeignKey, text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,6 +29,8 @@ class PickupAddress(Base):
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     state: Mapped[str] = mapped_column(String(100), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("'India'"))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("1"))
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")

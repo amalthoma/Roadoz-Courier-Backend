@@ -16,11 +16,13 @@ from app.models.order import OrderStatus
 
 from app.schemas.order import (
     PickupAddressCreate,
+    PickupAddressUpdate,
     PickupAddressOut,
     PickupAddressListResponse,
     ConsigneeCreate,
     ConsigneeOut,
     ConsigneeListResponse,
+    ConsigneeUpdate,
     OrderCreate,
     OrderOut,
     OrderListResponse,
@@ -28,18 +30,28 @@ from app.schemas.order import (
     BulkOrderResponse,
     LocationRequest,
     OrderStatusListResponse,
+    OrderUpdate,
+    
 
 )
 from app.services.order_service import (
     search_pickup_addresses,
     create_pickup_address,
+    update_pickup_address,
+    delete_pickup_address,
     search_consignees,
     create_consignee,
+    update_consignee,
+    delete_consignee,
     create_order,
     create_bulk_orders,
     list_orders,
     get_order,
-    get_filtered_orders_service
+    get_filtered_orders_service,
+    update_order,
+    delete_order,
+    duplicate_order,
+    get_order_counts,
 )
 
 from sqlalchemy.orm import Session
@@ -55,7 +67,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from PIL import Image
-from pyzbar.pyzbar import decode
+# pyzbar imported lazily — see _lazy_decode()
 import httpx
 from app.models.order import Order, ConsigneeToDelivery, PickupToConsignees,WarehouseToDelivery
 
@@ -70,7 +82,13 @@ from app.schemas.order import TodayStatusRequest,OrderStatusRequest
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
 
-# ── Pickup Addresses ───────────────────────────────────────────────────────
+def _lazy_decode(image):
+    """Lazy import of pyzbar to avoid crash when DLLs are missing."""
+    from pyzbar.pyzbar import decode as _decode
+    return _decode(image)
+
+
+# â”€â”€ Pickup Addresses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/pickup-addresses", response_model=PickupAddressListResponse)
@@ -93,17 +111,41 @@ async def create_pickup_address_endpoint(
     return await create_pickup_address(db, data, current_user)
 
 
-# ── Consignees ─────────────────────────────────────────────────────────────
+@router.put("/pickup-addresses/{address_id}", response_model=PickupAddressOut)
+async def update_pickup_address_endpoint(
+    address_id: str,
+    data: PickupAddressUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("pickup_addresses:create")),
+):
+    return await update_pickup_address(db, address_id, data, current_user)
+
+
+@router.delete("/pickup-addresses/{address_id}", status_code=204)
+async def delete_pickup_address_endpoint(
+    address_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("pickup_addresses:create")),
+):
+    await delete_pickup_address(db, address_id, current_user)
+    return Response(status_code=204)
+
+
+# â”€â”€ Consignees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/consignees", response_model=ConsigneeListResponse)
 async def search_consignees_endpoint(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(25, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search by name, email, or mobile"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("consignees:view")),
 ):
-    return await search_consignees(db, current_user, search=search)
+    return await search_consignees(db, current_user, search=search, page=page, limit=limit)
 
 
 @router.post("/consignees", response_model=ConsigneeOut, status_code=201)
@@ -116,7 +158,29 @@ async def create_consignee_endpoint(
     return await create_consignee(db, data, current_user)
 
 
-# ── Orders ─────────────────────────────────────────────────────────────────
+@router.put("/consignees/{consignee_id}", response_model=ConsigneeOut)
+async def update_consignee_endpoint(
+    consignee_id: str,
+    data: ConsigneeUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("consignees:create")),
+):
+    return await update_consignee(db, consignee_id, data, current_user)
+
+
+@router.delete("/consignees/{consignee_id}", status_code=204)
+async def delete_consignee_endpoint(
+    consignee_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("consignees:create")),
+):
+    await delete_consignee(db, consignee_id, current_user)
+    return Response(status_code=204)
+
+
+# â”€â”€ Orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("", response_model=OrderOut, status_code=201)
@@ -139,20 +203,57 @@ async def create_bulk_orders_endpoint(
     return await create_bulk_orders(db, data, current_user)
 
 
-@router.get("", response_model=OrderListResponse)
-async def list_orders_endpoint(
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
-    search: Optional[str] = Query(None, description="Search by order number"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    order_type: Optional[str] = Query(None, description="Filter by order type (B2C, B2B, International)"),
+# @router.get("", response_model=OrderListResponse)
+# async def list_orders_endpoint(
+#     page: int = Query(1, ge=1),
+#     limit: int = Query(10, ge=1, le=100),
+#     search: Optional[str] = Query(None, description="Search by order number"),
+#     status: Optional[str] = Query(None, description="Filter by status"),
+#     order_type: Optional[str] = Query(None, description="Filter by order type (B2C, B2B, International)"),
+#     db: AsyncSession = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     _: User = Depends(require_permission("orders:view")),
+# ):
+#     return await list_orders(
+#         db, current_user, page=page, limit=limit,
+#         search=search, status_filter=status, order_type=order_type,
+#     )
+
+@router.get("/orders")
+async def get_orders(
+    page: int = Query(1),
+    limit: int = Query(25),
+
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+
+    order_id: str | None = None,
+    awb_no: str | None = None,
+    buyer_name: str | None = None,
+
+    payment_method: str | None = None,
+    status_filter: str | None = None,
+
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("orders:view")),
 ):
+
     return await list_orders(
-        db, current_user, page=page, limit=limit,
-        search=search, status_filter=status, order_type=order_type,
+        db=db,
+        current_user=current_user,
+
+        page=page,
+        limit=limit,
+
+        start_date=start_date,
+        end_date=end_date,
+
+        order_id=order_id,
+        awb_no=awb_no,
+        buyer_name=buyer_name,
+
+        payment_method=payment_method,
+        status_filter=status_filter,
     )
 
 @router.get("/status", response_model=OrderStatusListResponse)
@@ -181,7 +282,7 @@ import uuid
 from io import BytesIO
 
 from PIL import Image
-from pyzbar.pyzbar import decode
+# pyzbar imported lazily — see _lazy_decode()
 
 import barcode
 from barcode.writer import ImageWriter
@@ -197,7 +298,7 @@ def decode_barcode_from_base64(barcode_base64: str) -> str:
     image_data = base64.b64decode(barcode_base64)
     image = Image.open(BytesIO(image_data))
 
-    decoded_objects = decode(image)
+    decoded_objects = _lazy_decode(image)
     if not decoded_objects:
         raise Exception("Barcode not readable")
 
@@ -253,15 +354,63 @@ async def get_order_barcode_endpoint(
 
 
 
+# @router.put("/{order_id}", response_model=OrderOut)
+# async def edit_order(
+#     order_id: str,
+#     data: OrderUpdate,
+#     db: AsyncSession = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+# ):
+#     return await update_order(
+#         db=db,
+#         order_id=order_id,
+#         data=data,
+#         current_user=current_user,
+#     )
 
 
+@router.delete("/{order_id}/")
+async def remove_order(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    return await delete_order(
+        db=db,
+        order_id=order_id,
+        current_user=current_user,
+    )
 
 
+@router.patch("/{order_id}/", response_model=OrderOut)
+async def edit_order(
+    order_id: str,
+    data: OrderUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    return await update_order(
+        db=db,
+        order_id=order_id,
+        data=data,
+        current_user=current_user,
+    )
 
 
+@router.post("/{order_id}/duplicate", response_model=OrderOut)
+async def duplicate_existing_order(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    order = await duplicate_order(db, order_id, current_user)
+    await db.commit()
+    return order
 
 
-@router.get("/{order_id}", response_model=OrderOut)
+@router.get("/{order_id}/", response_model=OrderOut)
 async def get_order_endpoint(
     order_id: str,
     db: AsyncSession = Depends(get_db),
@@ -269,6 +418,7 @@ async def get_order_endpoint(
     _: User = Depends(require_permission("orders:view")),
 ):
     return await get_order(db, order_id, current_user)
+
 
 
 
@@ -283,7 +433,7 @@ CANCELLED = "cancelled"
 @router.get("/scan/{barcode}")
 async def scan_order(
     barcode: str,
-    db: AsyncSession = Depends(get_db),   # 👈 IMPORTANT (AsyncSession)
+    db: AsyncSession = Depends(get_db),   # ðŸ‘ˆ IMPORTANT (AsyncSession)
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view"))
 ):
@@ -311,7 +461,7 @@ async def scan_order(
                 img_data = base64.b64decode(o.barcode)
                 img = Image.open(BytesIO(img_data))
 
-                decoded = decode(img)
+                decoded = _lazy_decode(img)
 
                 for b in decoded:
                     value = b.data.decode("utf-8")
@@ -490,7 +640,7 @@ async def get_pincode_from_gps(
     except Exception:
         pass
 
-    # Get GPS pincode — dict or None
+    # Get GPS pincode â€” dict or None
     gps_data = await get_pincode_from_lat_lng(location.lat, location.lng)
     print("GPS DATA:", gps_data)
     # ERROR FIX 4: handle None from failed GPS lookup
@@ -786,6 +936,15 @@ async def get_today_status_orders(
             for o in orders
         ]
     }    
+
+
+
+@router.get("/counts")
+async def get_all_order_counts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_order_counts(db, current_user)
     
     
    

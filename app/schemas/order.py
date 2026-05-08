@@ -38,6 +38,23 @@ class PickupAddressCreate(BaseModel):
     city: str = Field(..., min_length=1, max_length=100)
     state: str = Field(..., min_length=1, max_length=100)
     country: str = Field("India", max_length=100)
+    active: bool = Field(True, description="Whether this address is active")
+    is_primary: bool = Field(False, description="Whether this is the primary pickup address")
+
+
+class PickupAddressUpdate(BaseModel):
+    nickname: Optional[str] = Field(None, min_length=1, max_length=100)
+    contact_name: Optional[str] = Field(None, min_length=1, max_length=150)
+    phone: Optional[str] = Field(None, min_length=1, max_length=20)
+    email: Optional[str] = Field(None, max_length=255)
+    address_line_1: Optional[str] = Field(None, min_length=1, max_length=500)
+    address_line_2: Optional[str] = Field(None, max_length=500)
+    pincode: Optional[str] = Field(None, min_length=1, max_length=10)
+    city: Optional[str] = Field(None, min_length=1, max_length=100)
+    state: Optional[str] = Field(None, min_length=1, max_length=100)
+    country: Optional[str] = Field(None, max_length=100)
+    active: Optional[bool] = None
+    is_primary: Optional[bool] = None
 
 
 class PickupAddressOut(BaseModel):
@@ -52,6 +69,8 @@ class PickupAddressOut(BaseModel):
     city: str
     state: str
     country: str
+    active: bool
+    is_primary: bool
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +108,7 @@ class ConsigneeOut(BaseModel):
     pincode: str
     city: str
     state: str
+    status: str = "active"
     created_at: datetime
     updated_at: datetime
 
@@ -98,6 +118,26 @@ class ConsigneeOut(BaseModel):
 class ConsigneeListResponse(BaseModel):
     items: List[ConsigneeOut]
     total: int
+    page: int
+    limit: int
+    pages: int
+
+
+class ConsigneeUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    mobile: Optional[str] = Field(None, min_length=1, max_length=20)
+    alternate_mobile: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=255)
+    address_line_1: Optional[str] = Field(None, min_length=1, max_length=500)
+    address_line_2: Optional[str] = Field(None, max_length=500)
+    pincode: Optional[str] = Field(None, min_length=1, max_length=10)
+    city: Optional[str] = Field(None, min_length=1, max_length=100)
+    state: Optional[str] = Field(None, min_length=1, max_length=100)
+    status: Optional[str] = Field(None, pattern="^(active|inactive)$", description="Must be 'active' or 'inactive'")
+
+
+class ConsigneeStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(active|inactive)$", description="Must be 'active' or 'inactive'")
 
 
 # ── Order Items (Product Details) ──────────────────────────────────────────
@@ -278,6 +318,33 @@ class BulkOrderResponse(BaseModel):
 
 class TodayStatusRequest(BaseModel):
      date: date                 
+
+
+
+class OrderUpdate(BaseModel):
+    order_type: Optional[OrderType] = None
+
+    pickup_address_id: Optional[str] = None
+    consignee_id: Optional[str] = None
+    warehouse_addresses_id: Optional[str] = None
+
+    payment_method: Optional[PaymentMethod] = None
+
+    cod_amount: Optional[float] = None
+    to_pay_amount: Optional[float] = None
+
+    rov: Optional[ROV] = None
+
+    order_value: Optional[float] = None
+
+    gst_number: Optional[str] = None
+    eway_bill_number: Optional[str] = None
+
+    shipping_charge: Optional[float] = None
+
+    items: Optional[List[OrderItemCreate]] = None
+    packages: Optional[List[OrderPackageCreate]] = None
+
      
          
 class FilterableStatus(str, Enum):

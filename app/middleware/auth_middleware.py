@@ -3,6 +3,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 import logging
 import time
+import uuid
+from app.utils.jwt import decode_token
+from app.core.database import AsyncSessionLocal
+from app.models.activity_log import ActivityLog
 
 logger = logging.getLogger(__name__)
 
@@ -43,4 +47,99 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+import re
+from starlette.routing import Match
+
+def _get_activity_description(request: Request) -> str:
+    # Try to match the exact FastAPI route
+    try:
+        for route in request.app.routes:
+            match, _ = route.matches(request.scope)
+            if match == Match.FULL:
+                # FastAPI auto-generates 'summary' from the function name or explicit decorator kwargs
+                summary = getattr(route, "summary", "")
+                name = getattr(route, "name", "")
+                
+                # If the developer explicitly added a docstring or summary, it's often capitalized nicely.
+                # If they didn't, name is the function name (e.g. create_consignee_endpoint).
+                if name:
+                    clean_name = name.replace("_", " ").strip()
+                    if clean_name.endswith(" endpoint"):
+                        clean_name = clean_name[:-9].strip()
+                    return clean_name.capitalize()
+                
+                if summary:
+                    return summary
+    except Exception:
+        pass
+        
+    # Fallback to URL parsing if route mapping fails
+    path = request.url.path
+    method = request.method
+    
+    if "/auth/login" in path:
+        return "User logged in"
+    
+    base_path = path.replace("/api/v1/", "").strip("/")
+    parts = base_path.split("/")
+    
+    # Filter out UUIDs and numeric IDs
+    entity_parts = [p for p in parts if not re.match(r'^[0-9a-fA-F-]{10,}$|^\d+$', p)]
+    
+    if entity_parts:
+        entity = entity_parts[-1]
+        if entity.endswith('ies'):
+            entity = entity[:-3] + 'y'
+        elif entity.endswith('sses'):
+            entity = entity[:-2]
+        elif entity.endswith('s') and not entity.endswith('ss'):
+            entity = entity[:-1]
+        module = entity.replace('-', ' ')
+    else:
+        module = "resource"
+    
+    if method == "POST":
+        action = "Created"
+    elif method in ["PUT", "PATCH"]:
+        action = "Updated"
+    elif method == "DELETE":
+        action = "Deleted"
+    else:
+        action = "Modified"
+        
+    return f"{action} {module}"
+
+class ActivityLoggingMiddleware(BaseHTTPMiddleware):
+    """Log write operations to the database."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        
+        # Only log successful write operations
+        if request.method in ["POST", "PUT", "DELETE", "PATCH"] and 200 <= response.status_code < 400:
+            user_id = None
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ")[1]
+                payload = decode_token(token)
+                if payload:
+                    user_id = payload.get("user_id")
+            
+            try:
+                async with AsyncSessionLocal() as db:
+                    log = ActivityLog(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        method=request.method,
+                        path=request.url.path,
+                        description=_get_activity_description(request),
+                        ip_address=request.client.host if request.client else None
+                    )
+                    db.add(log)
+                    await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to log activity: {e}")
+                
         return response

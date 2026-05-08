@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, delete, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -19,11 +19,14 @@ from app.services.wallet_service import debit_for_order
 from app.utils.barcode import generate_barcode_base64
 from app.schemas.order import (
     PickupAddressCreate,
+    PickupAddressUpdate,
     PickupAddressOut,
     PickupAddressListResponse,
     ConsigneeCreate,
     ConsigneeOut,
     ConsigneeListResponse,
+    ConsigneeUpdate,
+    ConsigneeStatusUpdate,
     OrderCreate,
     OrderOut,
     OrderItemOut,
@@ -33,6 +36,7 @@ from app.schemas.order import (
     BulkOrderCreate,
     BulkOrderError,
     BulkOrderResponse,
+    OrderUpdate,
 )
 from typing import List, Optional,Tuple
 from sqlalchemy.orm import Session
@@ -181,6 +185,8 @@ async def create_pickup_address(
         city=data.city,
         state=data.state,
         country=data.country,
+        active=data.active,
+        is_primary=data.is_primary,
     )
     db.add(addr)
     await db.flush()
@@ -188,11 +194,84 @@ async def create_pickup_address(
     return PickupAddressOut.model_validate(addr)
 
 
+async def update_pickup_address(
+    db: AsyncSession, address_id: str, data: PickupAddressUpdate, current_user: User
+) -> PickupAddressOut:
+    result = await db.execute(select(PickupAddress).where(PickupAddress.id == address_id))
+    addr = result.scalar_one_or_none()
+    if not addr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and addr.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and addr.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if data.nickname is not None:
+        addr.nickname = data.nickname
+    if data.contact_name is not None:
+        addr.contact_name = data.contact_name
+    if data.phone is not None:
+        addr.phone = data.phone
+    if data.email is not None:
+        addr.email = data.email
+    if data.address_line_1 is not None:
+        addr.address_line_1 = data.address_line_1
+    if data.address_line_2 is not None:
+        addr.address_line_2 = data.address_line_2
+    if data.pincode is not None:
+        addr.pincode = data.pincode
+    if data.city is not None:
+        addr.city = data.city
+    if data.state is not None:
+        addr.state = data.state
+    if data.country is not None:
+        addr.country = data.country
+    if data.active is not None:
+        addr.active = data.active
+    if data.is_primary is not None:
+        addr.is_primary = data.is_primary
+
+    await db.flush()
+    await db.refresh(addr)
+    return PickupAddressOut.model_validate(addr)
+
+
+async def delete_pickup_address(
+    db: AsyncSession, address_id: str, current_user: User
+) -> None:
+    result = await db.execute(select(PickupAddress).where(PickupAddress.id == address_id))
+    addr = result.scalar_one_or_none()
+    if not addr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pickup address not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and addr.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and addr.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Check if address is linked to any order
+    order_exists = await db.scalar(select(Order.id).where(Order.pickup_address_id == addr.id).limit(1))
+    if order_exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete pickup address because it is associated with one or more orders."
+        )
+
+    await db.delete(addr)
+    await db.flush()
+
+
 # ── Consignee ──────────────────────────────────────────────────────────────
 
 
 async def search_consignees(
-    db: AsyncSession, current_user: User, search: str | None = None
+    db: AsyncSession, current_user: User,
+    search: str | None = None,
+    page: int = 1,
+    limit: int = 25,
 ) -> ConsigneeListResponse:
     franchise_id = await _resolve_franchise_id(db, current_user)
 
@@ -216,12 +295,16 @@ async def search_consignees(
         count_query = count_query.where(search_filter)
 
     total = (await db.execute(count_query)).scalar_one()
-    result = await db.execute(query.order_by(Consignee.created_at.desc()).limit(50))
+    offset = (page - 1) * limit
+    result = await db.execute(query.order_by(Consignee.created_at.desc()).offset(offset).limit(limit))
     consignees = result.scalars().all()
 
     return ConsigneeListResponse(
         items=[ConsigneeOut.model_validate(c) for c in consignees],
         total=total,
+        page=page,
+        limit=limit,
+        pages=math.ceil(total / limit) if total > 0 else 0,
     )
 
 
@@ -248,6 +331,73 @@ async def create_consignee(
     await db.flush()
     await db.refresh(consignee)
     return ConsigneeOut.model_validate(consignee)
+
+
+async def update_consignee(
+    db: AsyncSession, consignee_id: str, data: ConsigneeUpdate, current_user: User
+) -> ConsigneeOut:
+    result = await db.execute(select(Consignee).where(Consignee.id == consignee_id))
+    consignee = result.scalar_one_or_none()
+    if not consignee:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consignee not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and consignee.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and consignee.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Update only provided fields
+    if data.name is not None:
+        consignee.name = data.name
+    if data.mobile is not None:
+        consignee.mobile = data.mobile
+    if data.alternate_mobile is not None:
+        consignee.alternate_mobile = data.alternate_mobile
+    if data.email is not None:
+        consignee.email = data.email
+    if data.address_line_1 is not None:
+        consignee.address_line_1 = data.address_line_1
+    if data.address_line_2 is not None:
+        consignee.address_line_2 = data.address_line_2
+    if data.pincode is not None:
+        consignee.pincode = data.pincode
+    if data.city is not None:
+        consignee.city = data.city
+    if data.state is not None:
+        consignee.state = data.state
+    if data.status is not None:
+        consignee.status = data.status
+
+    await db.flush()
+    await db.refresh(consignee)
+    return ConsigneeOut.model_validate(consignee)
+
+
+async def delete_consignee(
+    db: AsyncSession, consignee_id: str, current_user: User
+) -> None:
+    result = await db.execute(select(Consignee).where(Consignee.id == consignee_id))
+    consignee = result.scalar_one_or_none()
+    if not consignee:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consignee not found")
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+    if franchise_id and consignee.franchise_id != franchise_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    elif not franchise_id and consignee.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Check if consignee is linked to any order
+    order_exists = await db.scalar(select(Order.id).where(Order.consignee_id == consignee.id).limit(1))
+    if order_exists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete consignee because it is associated with one or more orders."
+        )
+
+    await db.delete(consignee)
+    await db.flush()
 
 
 # ── Order ──────────────────────────────────────────────────────────────────
@@ -293,7 +443,7 @@ async def create_order(
         order_value=data.order_value,
         gst_number=data.gst_number,
         eway_bill_number=data.eway_bill_number,
-        status=OrderStatus.MANIFESTED,
+        status=OrderStatus.PROCESSING,
         created_by=current_user.id,
         franchise_id=franchise_id,
     )
@@ -389,60 +539,381 @@ async def create_bulk_orders(
     )
 
 
+
+
+## API for duplicating an existing order (useful for repeat shipments with same details)
+
+
+
+async def duplicate_order(
+    db: AsyncSession,
+    order_id: str,
+    current_user: User
+) -> OrderOut:
+
+    existing_order = (
+        await db.execute(
+            select(Order)
+            .where(Order.id == order_id)
+        )
+    ).scalar_one_or_none()
+
+    if not existing_order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    existing_items = (
+        await db.execute(
+            select(OrderItem).where(OrderItem.order_id == order_id)
+        )
+    ).scalars().all()
+
+    existing_packages = (
+        await db.execute(
+            select(OrderPackage).where(OrderPackage.order_id == order_id)
+        )
+    ).scalars().all()
+
+    new_order_number = await _generate_order_number(db)
+
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    new_order = Order(
+        id=str(uuid.uuid4()),
+        order_number=new_order_number,
+        order_type=existing_order.order_type,
+        pickup_address_id=existing_order.pickup_address_id,
+        consignee_id=existing_order.consignee_id,
+        warehouse_addresses_id=existing_order.warehouse_addresses_id,
+        payment_method=existing_order.payment_method,
+        cod_amount=existing_order.cod_amount,
+        to_pay_amount=existing_order.to_pay_amount,
+        rov=existing_order.rov,
+        order_value=existing_order.order_value,
+        gst_number=existing_order.gst_number,
+        eway_bill_number=existing_order.eway_bill_number,
+        shipping_charge=existing_order.shipping_charge,
+        total_boxes=existing_order.total_boxes,
+        total_weight_kg=existing_order.total_weight_kg,
+        total_vol_weight_kg=existing_order.total_vol_weight_kg,
+        applicable_weight_kg=existing_order.applicable_weight_kg,
+        status=OrderStatus.PROCESSING,
+        created_by=current_user.id,
+        franchise_id=franchise_id,
+    )
+
+    new_order.barcode = generate_barcode_base64(new_order_number)
+
+    db.add(new_order)
+    await db.flush()
+
+    for item in existing_items:
+        new_item = OrderItem(
+            id=str(uuid.uuid4()),
+            order_id=new_order.id,
+            product_name=item.product_name,
+            sku=item.sku,
+            unit_price=item.unit_price,
+            qty=item.qty,
+            total=item.total,
+        )
+        db.add(new_item)
+
+    for pkg in existing_packages:
+        new_pkg = OrderPackage(
+            id=str(uuid.uuid4()),
+            order_id=new_order.id,
+            count=pkg.count,
+            length_cm=pkg.length_cm,
+            breadth_cm=pkg.breadth_cm,
+            height_cm=pkg.height_cm,
+            vol_weight_kg=pkg.vol_weight_kg,
+            physical_weight_kg=pkg.physical_weight_kg,
+        )
+        db.add(new_pkg)
+
+    await db.flush()
+
+    if new_order.shipping_charge > 0 and franchise_id:
+        await debit_for_order(
+            db,
+            franchise_id,
+            new_order.id,
+            new_order.shipping_charge
+        )
+
+    await db.refresh(new_order)
+    await db.refresh(
+        new_order,
+        attribute_names=[
+            "items",
+            "packages",
+            "pickup_address",
+            "consignee"
+        ]
+    )
+
+    return _build_order_out(new_order)
+
+
+# async def list_orders(
+#     db: AsyncSession,
+#     current_user: User,
+#     page: int = 1,
+#     limit: int = 10,
+#     search: str | None = None,
+#     status_filter: str | None = None,
+#     order_type: str | None = None,
+# ) -> OrderListResponse:
+#     caller_role = await _get_caller_role_name(db, current_user.id)
+
+#     base_filters = []
+
+#     # Scope: franchise users see only their franchise orders, non-franchise see their own
+#     if caller_role != "super_admin":
+#         franchise_id = await _resolve_franchise_id(db, current_user)
+#         if franchise_id:
+#             base_filters.append(Order.franchise_id == franchise_id)
+#         else:
+#             base_filters.append(Order.created_by == current_user.id)
+
+#     if status_filter:
+#         base_filters.append(Order.status == status_filter)
+#     if order_type:
+#         base_filters.append(Order.order_type == order_type)
+
+#     query = select(Order).order_by(Order.created_at.desc())
+#     count_query = select(func.count()).select_from(Order)
+
+#     for f in base_filters:
+#         query = query.where(f)
+#         count_query = count_query.where(f)
+
+#     if search:
+#         search_filter = or_(
+#             Order.order_number.ilike(f"%{search}%"),
+#         )
+#         query = query.where(search_filter)
+#         count_query = count_query.where(search_filter)
+
+#     total = (await db.execute(count_query)).scalar_one()
+#     offset = (page - 1) * limit
+#     result = await db.execute(query.offset(offset).limit(limit))
+#     orders = result.scalars().all()
+
+#     items = [_build_order_out(o) for o in orders]
+
+#     return OrderListResponse(
+#         items=items,
+#         total=total,
+#         page=page,
+#         limit=limit,
+#         pages=math.ceil(total / limit) if total > 0 else 0,
+#     )
+
+
 async def list_orders(
     db: AsyncSession,
     current_user: User,
+
     page: int = 1,
-    limit: int = 10,
-    search: str | None = None,
+    limit: int = 25,
+
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+
+    order_id: str | None = None,
+    awb_no: str | None = None,
+    buyer_name: str | None = None,
+
+    payment_method: str | None = None,
     status_filter: str | None = None,
-    order_type: str | None = None,
-) -> OrderListResponse:
-    caller_role = await _get_caller_role_name(db, current_user.id)
+) -> dict:
 
-    base_filters = []
+    filters = []
 
-    # Scope: franchise users see only their franchise orders, non-franchise see their own
+    
+
+    caller_role = await _get_caller_role_name(
+        db,
+        current_user.id
+    )
+
     if caller_role != "super_admin":
-        franchise_id = await _resolve_franchise_id(db, current_user)
-        if franchise_id:
-            base_filters.append(Order.franchise_id == franchise_id)
-        else:
-            base_filters.append(Order.created_by == current_user.id)
 
-    if status_filter:
-        base_filters.append(Order.status == status_filter)
-    if order_type:
-        base_filters.append(Order.order_type == order_type)
-
-    query = select(Order).order_by(Order.created_at.desc())
-    count_query = select(func.count()).select_from(Order)
-
-    for f in base_filters:
-        query = query.where(f)
-        count_query = count_query.where(f)
-
-    if search:
-        search_filter = or_(
-            Order.order_number.ilike(f"%{search}%"),
+        franchise_id = await _resolve_franchise_id(
+            db,
+            current_user
         )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
 
-    total = (await db.execute(count_query)).scalar_one()
+        if franchise_id:
+            filters.append(
+                Order.franchise_id == franchise_id
+            )
+        else:
+            filters.append(
+                Order.created_by == current_user.id
+            )
+
+   
+
+    if start_date:
+        filters.append(
+            Order.created_at >= start_date
+        )
+
+    if end_date:
+        filters.append(
+            Order.created_at <= end_date
+        )
+
+    
+
+    if order_id:
+        filters.append(
+            Order.order_number.ilike(
+                f"%{order_id}%"
+            )
+        )
+
+    
+
+    if awb_no:
+        filters.append(
+            Order.barcode.ilike(
+                f"%{awb_no}%"
+            )
+        )
+
+    
+
+    if buyer_name:
+        filters.append(
+            Order.customer_name.ilike(
+                f"%{buyer_name}%"
+            )
+        )
+
+    
+
+    if (
+        payment_method
+        and payment_method != "All"
+    ):
+        filters.append(
+            Order.payment_method == payment_method
+        )
+
+    
+    if (
+        status_filter
+        and status_filter != "All"
+    ):
+        filters.append(
+            Order.status == status_filter
+        )
+
+    
+
+    query = (
+        select(Order)
+        .where(and_(*filters))
+        .order_by(Order.created_at.desc())
+    )
+
+    
+
+    count_query = (
+        select(func.count())
+        .select_from(Order)
+        .where(and_(*filters))
+    )
+
+    
+
     offset = (page - 1) * limit
-    result = await db.execute(query.offset(offset).limit(limit))
+
+    result = await db.execute(
+        query.offset(offset).limit(limit)
+    )
+
     orders = result.scalars().all()
 
-    items = [_build_order_out(o) for o in orders]
+    total = (
+        await db.execute(count_query)
+    ).scalar_one()
 
-    return OrderListResponse(
-        items=items,
-        total=total,
-        page=page,
-        limit=limit,
-        pages=math.ceil(total / limit) if total > 0 else 0,
+    
+
+    status_count_query = (
+        select(
+            Order.status,
+            func.count(Order.id)
+        )
+        .where(and_(*filters))
+        .group_by(Order.status)
     )
+
+    status_result = await db.execute(
+        status_count_query
+    )
+
+    raw_status_counts = {
+        row[0]: row[1]
+        for row in status_result.all()
+    }
+
+    
+
+    all_statuses = [
+        "Processing",
+        "Manifested",
+        "Picked",
+        "Not Picked",
+        "In_transit",
+        "Ndr",
+        "Ofd",
+        "Delivered",
+        "Rto_in_transit",
+        "Rto_delivered",
+        "Returned",
+        "Cancelled",
+        "Lost",
+    ]
+
+    status_counts = {
+        status: raw_status_counts.get(status, 0)
+        for status in all_statuses
+    }
+
+    
+
+    items = [
+        _build_order_out(order)
+        for order in orders
+    ]
+
+   
+
+    return {
+        "items": items,
+
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (
+                math.ceil(total / limit)
+                if total > 0
+                else 0
+            ),
+        },
+
+        "status_counts": status_counts,
+    }
+
 
 
 async def get_order(
@@ -491,3 +962,472 @@ async def get_filtered_orders_service(
     orders = result.scalars().all()
 
     return total, orders
+
+
+
+## Order Update API
+
+
+# async def update_order(
+#     db: AsyncSession,
+#     order_id: str,
+#     data: OrderUpdate,
+#     current_user: User
+# ) -> OrderOut:
+
+#     order = (
+#         await db.execute(
+#             select(Order)
+#             .where(Order.id == order_id)
+#         )
+#     ).scalar_one_or_none()
+
+#     if not order:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="Order not found"
+#         )
+
+#     if data.pickup_address_id:
+#         pickup = (
+#             await db.execute(
+#                 select(PickupAddress).where(
+#                     PickupAddress.id == data.pickup_address_id
+#                 )
+#             )
+#         ).scalar_one_or_none()
+
+#         if not pickup:
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="Pickup address not found"
+#             )
+
+#         order.pickup_address_id = data.pickup_address_id
+
+#     if data.consignee_id:
+#         consignee = (
+#             await db.execute(
+#                 select(Consignee).where(
+#                     Consignee.id == data.consignee_id
+#                 )
+#             )
+#         ).scalar_one_or_none()
+
+#         if not consignee:
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="Consignee not found"
+#             )
+
+#         order.consignee_id = data.consignee_id
+
+#     if data.warehouse_addresses_id:
+#         warehouse = (
+#             await db.execute(
+#                 select(WareHouseAddress).where(
+#                     WareHouseAddress.id == data.warehouse_addresses_id
+#                 )
+#             )
+#         ).scalar_one_or_none()
+
+#         if not warehouse:
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail="Warehouse not found"
+#             )
+
+#         order.warehouse_addresses_id = data.warehouse_addresses_id
+
+#     if data.order_type:
+#         order.order_type = data.order_type.value
+
+#     if data.payment_method:
+#         order.payment_method = data.payment_method.value
+
+#     if data.rov:
+#         order.rov = data.rov.value
+
+#     order.cod_amount = data.cod_amount
+#     order.to_pay_amount = data.to_pay_amount
+#     order.order_value = data.order_value
+#     order.gst_number = data.gst_number
+#     order.eway_bill_number = data.eway_bill_number
+#     order.shipping_charge = data.shipping_charge
+
+    
+#     if data.items is not None:
+
+#         await db.execute(
+#             delete(OrderItem).where(OrderItem.order_id == order.id)
+#         )
+
+#         for item_data in data.items:
+#             item = OrderItem(
+#                 id=str(uuid.uuid4()),
+#                 order_id=order.id,
+#                 product_name=item_data.product_name,
+#                 sku=item_data.sku,
+#                 unit_price=item_data.unit_price,
+#                 qty=item_data.qty,
+#                 total=item_data.total,
+#             )
+#             db.add(item)
+
+#     # -------------------------
+#     # Update Packages
+#     # -------------------------
+#     total_boxes = 0
+#     total_weight = 0.0
+#     total_vol = 0.0
+
+#     if data.packages is not None:
+
+#         # Delete existing packages
+#         await db.execute(
+#             delete(OrderPackage).where(OrderPackage.order_id == order.id)
+#         )
+
+#         # Add new packages
+#         for pkg_data in data.packages:
+
+#             pkg = OrderPackage(
+#                 id=str(uuid.uuid4()),
+#                 order_id=order.id,
+#                 count=pkg_data.count,
+#                 length_cm=pkg_data.length_cm,
+#                 breadth_cm=pkg_data.breadth_cm,
+#                 height_cm=pkg_data.height_cm,
+#                 vol_weight_kg=pkg_data.vol_weight_kg,
+#                 physical_weight_kg=pkg_data.physical_weight_kg,
+#             )
+
+#             db.add(pkg)
+
+#             total_boxes += pkg_data.count
+#             total_weight += (
+#                 pkg_data.physical_weight_kg * pkg_data.count
+#             )
+#             total_vol += (
+#                 pkg_data.vol_weight_kg * pkg_data.count
+#             )
+
+#         applicable = max(total_weight, total_vol)
+
+#         order.total_boxes = total_boxes
+#         order.total_weight_kg = round(total_weight, 2)
+#         order.total_vol_weight_kg = round(total_vol, 2)
+#         order.applicable_weight_kg = round(applicable, 2)
+
+#     # Regenerate barcode if needed
+#     order.barcode = generate_barcode_base64(order.order_number)
+
+#     await db.commit()
+
+#     # Refresh relationships
+#     await db.refresh(order)
+#     await db.refresh(
+#         order,
+#         attribute_names=[
+#             "items",
+#             "packages",
+#             "pickup_address",
+#             "consignee"
+#         ]
+#     )
+
+#     return _build_order_out(order)
+
+
+
+async def update_order(
+    db: AsyncSession,
+    order_id: str,
+    data: OrderUpdate,
+    current_user: User
+) -> OrderOut:
+
+    print("Updating order:", order_id)
+    order = (
+        await db.execute(
+            select(Order).where(Order.id == order_id)
+        )
+    ).scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+
+    if data.pickup_address_id:
+
+        pickup = (
+            await db.execute(
+                select(PickupAddress).where(
+                    PickupAddress.id == data.pickup_address_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not pickup:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pickup address not found"
+            )
+
+        order.pickup_address_id = data.pickup_address_id
+
+    
+    if data.consignee_id:
+
+        consignee = (
+            await db.execute(
+                select(Consignee).where(
+                    Consignee.id == data.consignee_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not consignee:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Consignee not found"
+            )
+
+        order.consignee_id = data.consignee_id
+
+    
+    if data.warehouse_addresses_id:
+
+        warehouse = (
+            await db.execute(
+                select(WareHouseAddress).where(
+                    WareHouseAddress.id == data.warehouse_addresses_id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not warehouse:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Warehouse not found"
+            )
+
+        order.warehouse_addresses_id = data.warehouse_addresses_id
+
+    
+
+    update_data = data.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+
+        # Skip separately handled fields
+        if field in [
+            "items",
+            "packages",
+            "pickup_address_id",
+            "consignee_id",
+            "warehouse_addresses_id",
+        ]:
+            continue
+
+        # Handle enum values
+        if field in ["order_type", "payment_method", "rov"]:
+            setattr(order, field, value.value)
+
+        else:
+            setattr(order, field, value)
+
+    
+
+    if data.items is not None:
+
+        # Delete old items
+        await db.execute(
+            delete(OrderItem).where(
+                OrderItem.order_id == order.id
+            )
+        )
+
+        # Add new items
+        for item_data in data.items:
+
+            item = OrderItem(
+                id=str(uuid.uuid4()),
+                order_id=order.id,
+                product_name=item_data.product_name,
+                sku=item_data.sku,
+                unit_price=item_data.unit_price,
+                qty=item_data.qty,
+                total=item_data.total,
+            )
+
+            db.add(item)
+
+    
+
+    if data.packages is not None:
+
+        # Delete old packages
+        await db.execute(
+            delete(OrderPackage).where(
+                OrderPackage.order_id == order.id
+            )
+        )
+
+        total_boxes = 0
+        total_weight = 0.0
+        total_vol = 0.0
+
+        for pkg_data in data.packages:
+
+            pkg = OrderPackage(
+                id=str(uuid.uuid4()),
+                order_id=order.id,
+                count=pkg_data.count,
+                length_cm=pkg_data.length_cm,
+                breadth_cm=pkg_data.breadth_cm,
+                height_cm=pkg_data.height_cm,
+                vol_weight_kg=pkg_data.vol_weight_kg,
+                physical_weight_kg=pkg_data.physical_weight_kg,
+            )
+
+            db.add(pkg)
+
+            total_boxes += pkg_data.count
+
+            total_weight += (
+                pkg_data.physical_weight_kg * pkg_data.count
+            )
+
+            total_vol += (
+                pkg_data.vol_weight_kg * pkg_data.count
+            )
+
+        applicable = max(total_weight, total_vol)
+
+        order.total_boxes = total_boxes
+        order.total_weight_kg = round(total_weight, 2)
+        order.total_vol_weight_kg = round(total_vol, 2)
+        order.applicable_weight_kg = round(applicable, 2)
+
+    
+
+    order.barcode = generate_barcode_base64(
+        order.order_number
+    )
+
+    
+    await db.commit()
+
+    
+
+    await db.refresh(order)
+
+    await db.refresh(
+        order,
+        attribute_names=[
+            "items",
+            "packages",
+            "pickup_address",
+            "consignee",
+        ]
+    )
+    return _build_order_out(order)
+
+
+
+
+
+## Delete Order API
+
+async def delete_order(
+    db: AsyncSession,
+    order_id: str,
+    current_user: User
+):
+
+    
+
+    order = (
+        await db.execute(
+            select(Order).where(Order.id == order_id)
+        )
+    ).scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    
+
+    await db.execute(
+        delete(OrderItem).where(
+            OrderItem.order_id == order.id
+        )
+    )
+
+    await db.execute(
+        delete(OrderPackage).where(
+            OrderPackage.order_id == order.id
+        )
+    )
+
+    
+
+    await db.delete(order)
+
+    
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "Order deleted successfully"
+    }
+
+
+
+async def get_order_counts(
+    db: AsyncSession,
+    current_user: User
+):
+    franchise_id = await _resolve_franchise_id(db, current_user)
+
+    base_query = select(Order)
+
+    if franchise_id:
+        base_query = base_query.where(Order.franchise_id == franchise_id)
+
+    total_orders = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.franchise_id == franchise_id
+        )
+    )
+
+    status_counts_query = (
+        select(
+            Order.status,
+            func.count(Order.id)
+        )
+        .where(Order.franchise_id == franchise_id)
+        .group_by(Order.status)
+    )
+
+    result = await db.execute(status_counts_query)
+    rows = result.all()
+
+    status_counts = {
+        status.value: 0 for status in OrderStatus
+    }
+
+    for status, count in rows:
+        status_counts[status] = count
+
+    return {
+        "total_orders": total_orders or 0,
+        "status_counts": status_counts
+    }
