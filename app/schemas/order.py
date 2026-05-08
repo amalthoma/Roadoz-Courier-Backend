@@ -38,6 +38,23 @@ class PickupAddressCreate(BaseModel):
     city: str = Field(..., min_length=1, max_length=100)
     state: str = Field(..., min_length=1, max_length=100)
     country: str = Field("India", max_length=100)
+    active: bool = Field(True, description="Whether this address is active")
+    is_primary: bool = Field(False, description="Whether this is the primary pickup address")
+
+
+class PickupAddressUpdate(BaseModel):
+    nickname: Optional[str] = Field(None, min_length=1, max_length=100)
+    contact_name: Optional[str] = Field(None, min_length=1, max_length=150)
+    phone: Optional[str] = Field(None, min_length=1, max_length=20)
+    email: Optional[str] = Field(None, max_length=255)
+    address_line_1: Optional[str] = Field(None, min_length=1, max_length=500)
+    address_line_2: Optional[str] = Field(None, max_length=500)
+    pincode: Optional[str] = Field(None, min_length=1, max_length=10)
+    city: Optional[str] = Field(None, min_length=1, max_length=100)
+    state: Optional[str] = Field(None, min_length=1, max_length=100)
+    country: Optional[str] = Field(None, max_length=100)
+    active: Optional[bool] = None
+    is_primary: Optional[bool] = None
 
 
 class PickupAddressOut(BaseModel):
@@ -52,6 +69,8 @@ class PickupAddressOut(BaseModel):
     city: str
     state: str
     country: str
+    active: bool
+    is_primary: bool
     created_at: datetime
     updated_at: datetime
 
@@ -325,3 +344,16 @@ class OrderUpdate(BaseModel):
 
     items: Optional[List[OrderItemCreate]] = None
     packages: Optional[List[OrderPackageCreate]] = None
+
+     
+         
+class FilterableStatus(str, Enum):
+    DISPATCHED = "Dispatched"
+    PICKED = "Picked"
+    CANCELLED = "Cancelled"
+    DELIVERED = "Delivered"
+
+class OrderStatusRequest(BaseModel):
+    status: FilterableStatus
+    page: int = 1
+    limit: int = 10
