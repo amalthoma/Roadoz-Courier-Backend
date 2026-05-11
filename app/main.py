@@ -13,8 +13,15 @@ from app.core.security import get_password_hash
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
 from app.routes import auth, franchise, orderreview,projectreview , profile, websocket, rbac, order, wallet, remittance, invoice,warehouse
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
+from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics
 from app.models.activity_log import ActivityLog
+from app.middleware.maintenance_middleware import MaintenanceMiddleware
+
+
+
+from app.websocket import notification_socket
+
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -284,6 +291,7 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ActivityLoggingMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(MaintenanceMiddleware)
 
 
 # ── Routers ──────────────────────────────────────────────────────────────────
@@ -306,7 +314,9 @@ app.include_router(coningeereview.router)
 app.include_router(webconfiguration.router)
 app.include_router(analytics.router, prefix=API_PREFIX)
 
+app.include_router(notification.router)
 
+app.include_router(notification_socket.router)
 
 
 @app.get("/", tags=["Health"])

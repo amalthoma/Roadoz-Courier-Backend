@@ -35,6 +35,7 @@ from app.schemas.order import (
     
 
 )
+from app.utils.webconfig import check_maintenance_mode
 from app.services.order_service import (
     search_pickup_addresses,
     create_pickup_address,
@@ -49,6 +50,7 @@ from app.services.order_service import (
     list_bulk_orders,
     list_orders,
     get_order,
+    get_order_bybarcode,
     get_filtered_orders_service,
     update_order,
     delete_order,
@@ -108,6 +110,7 @@ async def create_pickup_address_endpoint(
     data: PickupAddressCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    config: WebConfiguration = Depends(check_maintenance_mode),
     _: User = Depends(require_permission("pickup_addresses:create")),
 ):
     return await create_pickup_address(db, data, current_user)
@@ -258,16 +261,16 @@ async def get_orders(
 
     payment_method: str | None = None,
     status_filter: str | None = None,
+    config: WebConfiguration = Depends(check_maintenance_mode),
     bulk_order_id: str | None = Query(None, description="Filter by bulk order ID"),
 
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(WebConfiguration))
-    config = result.scalars().first()
-    if config:
-        if config.maintenance_mode:
-            raise HTTPException(status_code=503,detail="System under maintenance")
+    # result = await db.execute(select(WebConfiguration))
+    # config = result.scalars().first()
+    # if config and config.maintenance_mode:        
+    #         raise HTTPException(status_code=503,detail="System under maintenance")
 
     return await list_orders(
         db=db,
@@ -452,7 +455,13 @@ async def get_order_endpoint(
     return await get_order(db, order_id, current_user)
 
 
-
+@router.get("/getsinglorderbybarcode/{barcode}/",response_model=OrderOut)
+async def get_order_endpoint(
+    barcode: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("orders:view")),):
+    return await get_order_bybarcode(db,barcode,current_user)
 
 
 
