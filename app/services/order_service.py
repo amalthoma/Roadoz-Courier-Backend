@@ -17,6 +17,7 @@ from app.models.role import Role
 from app.models.user_role import UserRole
 from app.services.wallet_service import debit_for_order
 from app.utils.barcode import generate_barcode_base64
+
 from app.schemas.order import (
     PickupAddressCreate,
     PickupAddressUpdate,
@@ -401,7 +402,7 @@ async def delete_consignee(
 
 
 # ── Order ──────────────────────────────────────────────────────────────────
-
+from app.services.notification_service import create_notification
 
 async def create_order(
     db: AsyncSession, data: OrderCreate, current_user: User
@@ -504,6 +505,10 @@ async def create_order(
 
     # Reload all columns (created_at, updated_at, etc.) + relationships
     await db.refresh(order)
+    await create_notification(
+    db=db,
+    title="New Order",
+    message=(f"Order {order.order_number} "f"created successfully"),type="order",order_id=order.id,)
     await db.refresh(order, attribute_names=["items", "packages", "pickup_address", "consignee"])
 
     return _build_order_out(order)
@@ -934,6 +939,76 @@ async def get_order(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     return _build_order_out(order)
+
+
+
+# import base64
+
+# from fastapi import HTTPException, status
+
+# from sqlalchemy import select
+# from sqlalchemy.ext.asyncio import AsyncSession
+
+# from app.models.order import Order
+# from app.models.user import User
+
+# from app.schemas.order import OrderOut
+
+
+
+
+
+# async def get_order_bybarcode(db: AsyncSession,barcode: str,current_user: User,) -> OrderOut:
+#     decoded_input = barcode.strip()
+#     try:
+#         decoded_input = base64.b64decode(decoded_input).decode("utf-8")
+#     except Exception:
+#         pass
+#     stmt = select(Order).where((Order.barcode == decoded_input)|(Order.order_number == decoded_input))
+#     result = await db.execute(stmt)
+#     order = result.scalar_one_or_none()
+#     if not order:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Order not found")
+#     caller_role = await _get_caller_role_name(db,current_user.id)
+#     if caller_role != "super_admin":
+#         franchise_id = await _resolve_franchise_id(db,current_user)
+#         if franchise_id:
+#             if order.franchise_id != franchise_id:
+#                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="Access denied")
+#         elif order.created_by != current_user.id:
+#             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="Access denied")
+#     return _build_order_out(order)
+
+import base64
+
+from fastapi import HTTPException, status
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.order import Order
+from app.models.user import User
+
+from app.schemas.order import OrderOut
+
+
+async def get_order_bybarcode(db: AsyncSession,barcode: str,current_user: User,) -> OrderOut:
+    decoded_input = barcode.strip()
+    try:
+        decoded_input = base64.b64decode(decoded_input).decode("utf-8")
+    except Exception:
+        pass
+    stmt = select(Order).where(((Order.barcode == decoded_input)|(Order.order_number == decoded_input))&(Order.created_by == current_user.id))
+    result = await db.execute(stmt)
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Order not found")
+    return _build_order_out(order)
+
+
+
+
+
 
 
 

@@ -46,7 +46,7 @@ async def get_web_configuration(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user)):
     if current_user.role_name != "super_admin":
-        raise HTTPException(status_code=403,detail="Only admin can show")
+        raise HTTPException(status_code=403,detail="Only admin can show ")
     result = await db.execute(
         select(WebConfiguration))
     config = result.scalars().first()
