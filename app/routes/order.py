@@ -1,7 +1,7 @@
 import base64
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
+from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status, File, UploadFile, Form
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ from app.schemas.order import (
     OrderCreate,
     OrderOut,
     OrderListResponse,
-    BulkOrderCreate,
+    BulkOrderListResponse,
     BulkOrderResponse,
     LocationRequest,
     OrderStatusListResponse,
@@ -46,7 +46,8 @@ from app.services.order_service import (
     update_consignee,
     delete_consignee,
     create_order,
-    create_bulk_orders,
+    process_bulk_excel_upload,
+    list_bulk_orders,
     list_orders,
     get_order,
     get_order_bybarcode,
@@ -199,12 +200,35 @@ async def create_order_endpoint(
 
 @router.post("/bulk", response_model=BulkOrderResponse, status_code=200)
 async def create_bulk_orders_endpoint(
-    data: BulkOrderCreate,
+    order_type: str = Form(...),
+    pickup_address_id: str = Form(...),
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:create")),
 ):
-    return await create_bulk_orders(db, data, current_user)
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files are supported.")
+    
+    file_content = await file.read()
+    return await process_bulk_excel_upload(
+        db=db,
+        file_content=file_content,
+        file_name=file.filename,
+        order_type=order_type,
+        pickup_address_id=pickup_address_id,
+        current_user=current_user
+    )
+
+@router.get("/bulk", response_model=BulkOrderListResponse)
+async def list_bulk_orders_endpoint(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("orders:view")),
+):
+    return await list_bulk_orders(db, current_user, page=page, limit=limit)
 
 
 # @router.get("", response_model=OrderListResponse)
@@ -223,7 +247,7 @@ async def create_bulk_orders_endpoint(
 #         search=search, status_filter=status, order_type=order_type,
 #     )
 
-@router.get("/orders")
+@router.get("")
 async def get_orders(
     page: int = Query(1),
     limit: int = Query(25),
@@ -238,6 +262,8 @@ async def get_orders(
     payment_method: str | None = None,
     status_filter: str | None = None,
     config: WebConfiguration = Depends(check_maintenance_mode),
+    bulk_order_id: str | None = Query(None, description="Filter by bulk order ID"),
+
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -262,6 +288,7 @@ async def get_orders(
 
         payment_method=payment_method,
         status_filter=status_filter,
+        bulk_order_id=bulk_order_id,
     )
 
 @router.get("/status", response_model=OrderStatusListResponse)
