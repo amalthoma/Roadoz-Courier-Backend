@@ -10,7 +10,7 @@ from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
 
 from app.models.order import Order,OrderItem,OrderPackage
-from app.models.warehouse import WareHouseAddress
+from app.models.warehouse import WareHouseAddress,OrderWarehouseAddress
 
 from app.models.order import OrderStatus
 import pytz
@@ -74,7 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from PIL import Image
 # pyzbar imported lazily — see _lazy_decode()
 import httpx
-from app.models.order import Order, ConsigneeToDelivery, PickupToConsignees,WarehouseToDelivery
+from app.models.order import Order, ConsigneeToDelivery, PickupToConsignees,WarehouseToDelivery,FranchiseToDelivery
 
 from datetime import datetime, date
 from sqlalchemy import select, func, or_
@@ -83,7 +83,7 @@ from app.schemas.order import TodayStatusRequest,OrderStatusRequest
 from app.models.webconfiguration import WebConfiguration
 
 from app.dependencies.consigeeuser import get_current_user as get_current_consigee
-
+from app.models.franchise import OrderFranchiseAddress,Franchise
 
 
 
@@ -650,6 +650,15 @@ async def get_full_order(
 
 
 
+
+
+
+
+
+
+from sqlalchemy import select
+from datetime import datetime
+from sqlalchemy.orm import selectinload
 from app.services.notification_service import create_notification
 
 async def get_pincode_from_lat_lng(lat: float, lng: float):
@@ -671,82 +680,84 @@ async def get_pincode_from_lat_lng(lat: float, lng: float):
         print(f"Geocoding error: {str(e)}")
         return None
 
+def build_order_franchisestatus(franchise_mappings, franchise_index: int) -> str:
+    base_status = OrderStatus.DISPATCHED.value
+    if len(franchise_mappings) == 1:
+        return base_status
+    return f"{base_status}_{franchise_index}"
+
+
+def build_order_warehousestatus(warehouse_mappings, warehouse_index: int) -> str:
+    base_status = OrderStatus.WAREHOUSE.value
+    if len(warehouse_mappings) == 1:
+        return base_status
+    return f"{base_status}_{warehouse_index}"
+
+
+
+
+
+
+
+
 
 @router.post("/get-pincode/{barcode}")
 async def get_pincode_from_gps(
     barcode: str,
     location: LocationRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+    current_user: User = Depends(get_current_user),):
     decoded_barcode = barcode.strip()
     try:
         decoded_barcode = base64.b64decode(decoded_barcode).decode("utf-8")
     except Exception:
         pass
-
-    # Get GPS pincode â€” dict or None
     gps_data = await get_pincode_from_lat_lng(location.lat, location.lng)
-    print("GPS DATA:", gps_data)
-    # ERROR FIX 4: handle None from failed GPS lookup
     if not gps_data or not gps_data.get("pincode"):
-        raise HTTPException(status_code=400, detail="Could not determine pincode from GPS location")
-
-    gps_pincode = gps_data["pincode"]  # ERROR FIX 3: dict access, not attribute
-    stmt = select(Order).where(Order.order_number == decoded_barcode)
+        raise HTTPException(status_code=400, detail="Could not determine pincode")
+    gps_pincode = str(gps_data["pincode"]).strip()
+    stmt = (
+        select(Order)
+        .options(
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
+            selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
+        )
+        .where(Order.order_number == decoded_barcode))
     result = await db.execute(stmt)
     order = result.scalar_one_or_none()
-
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-
     pickup = order.pickup_address
     consignee = order.consignee
-    warehouseaddress=order.warehouseaddress
+    warehouse_mappings = order.warehouse_addresses
+    franchise_mappings = order.franchise_addresses
 
     if not pickup:
-        raise HTTPException(status_code=404, detail="Pickup address not found")
+        raise HTTPException(status_code=404, detail="Pickup not found")
     if not consignee:
         raise HTTPException(status_code=404, detail="Consignee not found")
-    # if not warehouseaddress:
-    #     raise HTTPException(status_code=404, detail="Warehouseaddress not found")
-    
-    
 
+    print("gps_pincode gps_pincode  ",gps_pincode)
     if pickup.pincode == gps_pincode:
-
-        existing_stmt = select(PickupToConsignees).where(PickupToConsignees.order_id == order.id)
-        existing_result = await db.execute(existing_stmt)
-        existing = existing_result.scalar_one_or_none()
-
-        if existing:
-            raise HTTPException(status_code=409, detail="Pickup to consignee record already exists for this order")
-
-        pickup_to_consignee = PickupToConsignees(
-            pincode=pickup.pincode,
-            status=OrderStatus.PICKED,
-            order_id=order.id,
-            pickup_addresses_id=pickup.id,
-            user_id=current_user.id  
-        )
-        db.add(pickup_to_consignee)
+        existing = await db.execute(select(PickupToConsignees).where(PickupToConsignees.order_id == order.id))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Pickup already done")
+        entry = PickupToConsignees(pincode=pickup.pincode,status=OrderStatus.PICKED,order_id=order.id,pickup_addresses_id=pickup.id,user_id=current_user.id)
+        db.add(entry)
         order.status = OrderStatus.PICKED
         order.updated_at = datetime.now(IST)
-        
-        await create_notification(
-        db=db,
-        title="Order Picked",
-        message=(f"Order {order.order_number} "f"Picked successfully"),type="order",order_id=order.id,)
+        await create_notification(db=db,title="Order Picked",message=f"Order {order.order_number} picked",type="order",order_id=order.id,)
         await db.commit()
-        await db.refresh(pickup_to_consignee)
-
+        await db.refresh(entry)
         return {
             "stage": "Picked",
             "order_id": order.id,
-            "user_id":current_user.id, 
+            "user_id": current_user.id,
             "order_number": order.order_number,
             "order_status": order.status,
-            "record_id": pickup_to_consignee.id,
+            "record_id": entry.id,
             "pickup_address_id": pickup.id,
             "pincode": pickup.pincode,
             "city": pickup.city,
@@ -757,86 +768,114 @@ async def get_pincode_from_gps(
             "gps_pincode": gps_pincode,
         }
         
+    matched_warehouse = None
+    warehouse_index = 0
+    for i, mapping in enumerate(warehouse_mappings, start=1):
+        wh = mapping.warehouse_address
+        if wh and wh.pincode == gps_pincode:
+            matched_warehouse = wh
+            warehouse_index = i
+            break
 
-    elif warehouseaddress and warehouseaddress.pincode == gps_pincode:
-        existing_stmt = select(WarehouseToDelivery).where(WarehouseToDelivery.order_id == order.id)
-        existing_result = await db.execute(existing_stmt)
-        existing = existing_result.scalar_one_or_none()
-
-        if existing:
-            raise HTTPException(status_code=409, detail="Warehouseaddress to consignee record already exists for this order")
-
-        pickup_to_consignee = WarehouseToDelivery(
-            pincode=warehouseaddress.pincode,
-            status=OrderStatus.DISPATCHED,
-            order_id=order.id,
-            warehouse_addresses_id=warehouseaddress.id,
-            user_id=current_user.id 
-        )
-        db.add(pickup_to_consignee)
-        order.status = OrderStatus.DISPATCHED
+    if matched_warehouse:
+        existing = await db.execute(select(WarehouseToDelivery).where(WarehouseToDelivery.order_id == order.id))
+        # if existing.scalar_one_or_none():
+        #     raise HTTPException(status_code=409, detail="Warehouse already done")
+        
+        status = build_order_warehousestatus(warehouse_mappings, warehouse_index)
+        # status = (OrderStatus.WAREHOUSE if len(warehouse_mappings) == 1 else f"{OrderStatus.WAREHOUSE}_{warehouse_index}")
+        entry = WarehouseToDelivery(pincode=matched_warehouse.pincode,status=status,order_id=order.id,warehouse_addresses_id=matched_warehouse.id,user_id=current_user.id)
+        db.add(entry)
+        order.status = status
         order.updated_at = datetime.now(IST)
-        
-        
-        await create_notification(
-        db=db,
-        title="Order Dispatched",
-        message=(f"Order {order.order_number} "f"Dispatched successfully"),type="order",order_id=order.id,)
+        await create_notification(db=db,title="Order WAREHOUSE",message=f"Order {order.order_number} {status} successfully",type="order",order_id=order.id,)
         await db.commit()
-        await db.refresh(pickup_to_consignee)
-
+        await db.refresh(entry)
+        # return {"stage": status, "order_id": order.id}
         return {
-            "stage": "Dispatched",
-            "order_id": order.id,
-            "user_id":current_user.id,
-            "order_number": order.order_number,
-            "order_status": order.status,
-            "record_id": warehouseaddress.id,
-            "warehouseaddress_address_id": warehouseaddress.id,
-            "pincode": warehouseaddress.pincode,
-            "city": warehouseaddress.city,
-            "state": warehouseaddress.state,
-            "address": warehouseaddress.address_line_1,
-            "contact_name": warehouseaddress.contact_name,
-            "phone": warehouseaddress.phone,
-            "gps_pincode": gps_pincode,
+        "stage": status,
+        "order_id": order.id,
+        "user_id": current_user.id,
+        "order_number": order.order_number,
+        "order_status": order.status,
+        "record_id": entry.id,
+        "warehouse_address_id": matched_warehouse.id,
+        "pincode": matched_warehouse.pincode,
+        "city": matched_warehouse.city,
+        "state": matched_warehouse.state,
+        "address": matched_warehouse.address_line_1,
+        "contact_name": matched_warehouse.contact_name,
+        "phone": matched_warehouse.phone,
+        "gps_pincode": gps_pincode,
         }
-        
- 
-    elif consignee.pincode == gps_pincode:
-        print("gps_pincode",gps_pincode)
-        
-        existing_stmt = select(ConsigneeToDelivery).where(ConsigneeToDelivery.order_id == order.id)
-        existing_result = await db.execute(existing_stmt)
-        existing = existing_result.scalar_one_or_none()
 
-        if existing:
-            raise HTTPException(status_code=409, detail="ConsigneeToDelivery record already exists for this order")
+
+
+
+    matched_franchise = None
+    franchise_index = 0
+    for i, mapping in enumerate(franchise_mappings, start=1):
+        fr = mapping.franchise_address   
+        print('fr.pincode   ',fr.pincode)
+        if fr and gps_pincode == fr.pincode:    
+            matched_franchise = fr
+            franchise_index = i
+            
+            break
+    print('matched_franchise  ',matched_franchise)    
+    if matched_franchise:
+        existing = await db.execute(select(FranchiseToDelivery).where(FranchiseToDelivery.order_id == order.id))
+        # if existing.scalar_one_or_none():
+        #     raise HTTPException(status_code=409, detail="Franchise already done")
         
-        consignee_to_delivery = ConsigneeToDelivery(
-            pincode=consignee.pincode,
-            status=OrderStatus.DELIVERED,
-            order_id=order.id,
-            consignee_id=consignee.id,
-            user_id=current_user.id 
-        )
-        db.add(consignee_to_delivery)
+        status = build_order_franchisestatus(franchise_mappings, franchise_index)
+        # status = (OrderStatus.DISPATCHED if len(franchise_mappings) == 1 else f"{OrderStatus.DISPATCHED}_{franchise_index}")
+        entry = FranchiseToDelivery(pincode=matched_franchise.pincode,status=status,order_id=order.id,franchise_addresses_id=matched_franchise.id,user_id=current_user.id)
+        db.add(entry)
+        order.status = status
+        order.updated_at = datetime.now(IST)
+        await create_notification(db=db,title="Order DISPATCHED",message=f"Order {order.order_number} {status} successfully",type="order",order_id=order.id,)
+        await db.commit()
+        await db.refresh(entry)
+        # return {"stage": status, "order_id": order.id}
+        return {
+        "stage": status,
+        "order_id": order.id,
+        "user_id": current_user.id,
+        "order_number": order.order_number,
+        "order_status": order.status,
+        "record_id": entry.id,
+        "franchise_address_id": matched_franchise.id,
+        "pincode": matched_franchise.pincode,
+        "address": matched_franchise.address,
+        "gender": matched_franchise.gender,
+        "current_address": matched_franchise.current_address,
+        "name": matched_franchise.name,
+        "phone": matched_franchise.phone,
+        "gps_pincode": gps_pincode,
+        }
+            
+    
+    
+    if int(consignee.pincode) == int(gps_pincode):  
+        print("consignee.pincode == gps_pincode",consignee.pincode,"   ",gps_pincode)  
+        existing = await db.execute(select(ConsigneeToDelivery).where(ConsigneeToDelivery.order_id == order.id))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Already delivered")
+        entry = ConsigneeToDelivery(pincode=consignee.pincode,status=OrderStatus.DELIVERED,order_id=order.id,consignee_id=consignee.id,user_id=current_user.id)
+        db.add(entry)
         order.status = OrderStatus.DELIVERED
         order.updated_at = datetime.now(IST)
-        await create_notification(
-        db=db,
-        title="Order Delivery",
-        message=(f"Order {order.order_number} "f"Delivery successfully"),type="order",order_id=order.id,)
+        await create_notification(db=db,title="Order Delivered",message=f"Order {order.order_number} Delivered successfully",type="order",order_id=order.id,)
         await db.commit()
-        await db.refresh(consignee_to_delivery)
-
+        await db.refresh(entry)
         return {
-            "stage": "Delivery",
+            "stage": "Delivered",
             "order_id": order.id,
-            "user_id":current_user.id ,
+            "user_id": current_user.id,
             "order_number": order.order_number,
             "order_status": order.status,
-            "record_id": consignee_to_delivery.id,
+            "record_id": entry.id,
             "consignee_id": consignee.id,
             "pincode": consignee.pincode,
             "consignee_name": consignee.name,
@@ -846,9 +885,111 @@ async def get_pincode_from_gps(
             "consignee_state": consignee.state,
             "gps_pincode": gps_pincode,
         }
+        
+        
+        
+    warehouse_stmt = await db.execute(select(WareHouseAddress).where(WareHouseAddress.pincode == gps_pincode))
+    global_warehouse = warehouse_stmt.scalar_one_or_none()
+    if global_warehouse:
+        existing_mapping_stmt = await db.execute(
+            select(OrderWarehouseAddress).where(
+                OrderWarehouseAddress.order_id == order.id,
+                OrderWarehouseAddress.warehouse_address_id == global_warehouse.id))
+        
+        existing_mapping = existing_mapping_stmt.scalar_one_or_none()
+        if not existing_mapping:
+            new_mapping = OrderWarehouseAddress(order_id=order.id,warehouse_address_id=global_warehouse.id)
+            db.add(new_mapping)
+            await db.flush()
+            warehouse_mappings.append(new_mapping)
+        warehouse_index = len(warehouse_mappings)
+        status = build_order_warehousestatus(warehouse_mappings,warehouse_index)
+        
+        tracking = WarehouseToDelivery(
+            pincode=global_warehouse.pincode,
+            status=status,
+            order_id=order.id,
+            warehouse_addresses_id=global_warehouse.id,
+            user_id=current_user.id)
+        db.add(tracking)
+        order.status = status
+        order.updated_at = datetime.now(IST)
+        await create_notification(db=db,title="Warehouse Scan",message=f"Order {order.order_number} reached warehouse",type="order",order_id=order.id,)
+        await db.commit()
+        await db.refresh(tracking)
 
-    else:
-        raise HTTPException(status_code=400, detail="GPS location does not match pickup or consignee pincode")
+        return {
+            "stage": status,
+            "type": "warehouse",
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "warehouse_id": global_warehouse.id,
+            "warehouse_name": global_warehouse.nickname,
+            "pincode": global_warehouse.pincode,
+            "city": global_warehouse.city,
+            "state": global_warehouse.state,
+            "gps_pincode": gps_pincode,
+        }
+    
+    
+    
+    
+    
+    franchise_stmt = await db.execute(select(Franchise).where(Franchise.pincode == gps_pincode))
+    global_franchise = franchise_stmt.scalar_one_or_none()
+    if global_franchise:
+        existing_mapping_stmt = await db.execute(
+            select(OrderFranchiseAddress).where(
+                OrderFranchiseAddress.order_id == order.id,
+                OrderFranchiseAddress.franchise_address_id == global_franchise.id))
+        existing_mapping = existing_mapping_stmt.scalar_one_or_none()
+        if not existing_mapping:
+            new_mapping = OrderFranchiseAddress(order_id=order.id,franchise_address_id=global_franchise.id)
+            db.add(new_mapping)
+            await db.flush()
+            franchise_mappings.append(new_mapping)
+        franchise_index = len(franchise_mappings)
+        status = build_order_franchisestatus(franchise_mappings,franchise_index)
+        tracking = FranchiseToDelivery(
+            pincode=global_franchise.pincode,
+            status=status,
+            order_id=order.id,
+            franchise_addresses_id=global_franchise.id,
+            user_id=current_user.id
+        )
+        db.add(tracking)
+        order.status = status
+        order.updated_at = datetime.now(IST)
+        await create_notification(db=db,title="Franchise Scan",message=f"Order {order.order_number} reached franchise",type="order",order_id=order.id,)
+        await db.commit()
+        await db.refresh(tracking)
+        return {
+            "stage": status,
+            "type": "franchise",
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "franchise_id": global_franchise.id,
+            "franchise_name": global_franchise.name,
+            "pincode": global_franchise.pincode,
+            "gps_pincode": gps_pincode,
+        }
+    raise HTTPException(status_code=400,detail="GPS does not match pickup, warehouse, franchise, or delivery")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 from enum import Enum as PyEnum
 

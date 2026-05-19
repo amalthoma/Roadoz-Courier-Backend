@@ -29,7 +29,9 @@ class OrderStatus(str, Enum):
     CANCELLED = "Cancelled"
     LOST = "Lost"
     PICKED = "Picked"           
-    DISPATCHED = "Dispatched" 
+    DISPATCHED = "Dispatched"
+    WAREHOUSE="Warehouse"
+     
 
 class BulkOrder(Base):
     __tablename__ = "bulk_orders"
@@ -80,9 +82,11 @@ class Order(Base):
     consignee_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("consignees.id", ondelete="RESTRICT"), nullable=False
     )
-    warehouse_addresses_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("warehouse_addresses.id", ondelete="RESTRICT"), nullable=True
-    )
+    warehouse_addresses = relationship("OrderWarehouseAddress",back_populates="order",cascade="all, delete-orphan",lazy="selectin")
+    
+    franchise_addresses = relationship("OrderFranchiseAddress",back_populates="order",cascade="all, delete-orphan",lazy="selectin")
+
+
     # Payment
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # COD | Prepaid | To Pay
     cod_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when COD
@@ -109,12 +113,12 @@ class Order(Base):
     barcode: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status
-    # status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'pending'"))
-    status: Mapped[OrderStatus] = mapped_column(
-                SqlEnum(OrderStatus),
-                nullable=False,
-                default=OrderStatus.PROCESSING
-            )
+    status: Mapped[str] = mapped_column(String(150), nullable=False, server_default=text("'Processing'"))
+    # status: Mapped[OrderStatus] = mapped_column(
+    #             SqlEnum(OrderStatus),
+    #             nullable=False,
+    #             default=OrderStatus.PROCESSING
+    #         )
 
     # Ownership
     created_by: Mapped[str] = mapped_column(
@@ -137,7 +141,6 @@ class Order(Base):
     packages = relationship("OrderPackage", back_populates="order", cascade="all, delete-orphan", lazy="selectin")
     pickup_address = relationship("PickupAddress", lazy="selectin")
     consignee = relationship("Consignee", lazy="selectin")
-    warehouseaddress = relationship("WareHouseAddress", lazy="selectin")
 
 
 class OrderItem(Base):
@@ -237,6 +240,25 @@ class WarehouseToDelivery(Base):
 
     order = relationship("Order", backref="warehouse_to_delivery")
     warehouse_address = relationship("WareHouseAddress", backref="warehouse_to_delivery") 
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True) 
+    created_at: Mapped[datetime] = mapped_column(DateTime,default=indian_time,nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime,default=indian_time,onupdate=datetime.utcnow,nullable=False)
+    
+    
+    
+    
+class FranchiseToDelivery(Base):
+    __tablename__ = "franchisetodelivery"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pincode = Column(String(10), nullable=False)
+    status = Column(String(20), default="pending")
+
+    order_id = Column(String(36), ForeignKey("orders.id", ondelete="CASCADE"))
+    franchise_addresses_id = Column(String(36), ForeignKey("franchises.id", ondelete="CASCADE"))
+
+    order = relationship("Order", backref="franchise_to_delivery")
+    franchise_address = relationship("Franchise", backref="franchise_to_delivery") 
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True) 
     created_at: Mapped[datetime] = mapped_column(DateTime,default=indian_time,nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime,default=indian_time,onupdate=datetime.utcnow,nullable=False)

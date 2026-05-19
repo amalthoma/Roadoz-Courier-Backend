@@ -20,6 +20,7 @@ from app.middleware.maintenance_middleware import MaintenanceMiddleware
 
 
 from app.websocket.user_admin_chat import router as websocket_router
+
 from app.websocket.notification_socket import router as ws_router
 
 
@@ -316,7 +317,8 @@ app.include_router(webconfiguration.router,prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)
 app.include_router(ws_router,prefix=API_PREFIX)
 app.include_router(notification.router,prefix=API_PREFIX)
-app.include_router(websocket_router,prefix=API_PREFIX)
+# app.include_router(websocket_router,prefix=API_PREFIX)
+app.include_router(websocket_router, prefix=API_PREFIX)
 app.include_router(user_admincommunication.router,prefix=API_PREFIX)
 
 

@@ -34,7 +34,7 @@ class FranchiseCreate(BaseModel):
 
     preferred_service_area: str
     nearby_landmark: Optional[str] = None
-    pin_codes_covered: str
+    pincode: str
 
     doc_id_proof: bool = False
     doc_address_proof: bool = False
@@ -77,7 +77,7 @@ class FranchiseUpdate(BaseModel):
 
     preferred_service_area: Optional[str] = None
     nearby_landmark: Optional[str] = None
-    pin_codes_covered: Optional[str] = None
+    pincode: Optional[str] = None
 
     doc_id_proof: Optional[bool] = None
     doc_address_proof: Optional[bool] = None
@@ -125,7 +125,7 @@ class FranchiseResponse(BaseModel):
 
     preferred_service_area: Optional[str]
     nearby_landmark: Optional[str]
-    pin_codes_covered: Optional[str]
+    pincode: Optional[str]
 
     doc_id_proof: bool
     doc_address_proof: bool

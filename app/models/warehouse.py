@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, DateTime, ForeignKey, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column,relationship
 from app.core.database import Base
 
 class WareHouseAddress(Base):
@@ -34,3 +34,16 @@ class WareHouseAddress(Base):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
 
+
+
+
+
+class OrderWarehouseAddress(Base):
+
+    __tablename__ = "order_warehouse_addresses"
+
+    id: Mapped[str] = mapped_column(String(36),primary_key=True,default=lambda: str(uuid.uuid4()))
+    order_id: Mapped[str] = mapped_column(String(36),ForeignKey("orders.id", ondelete="CASCADE"),nullable=False)
+    warehouse_address_id: Mapped[str] = mapped_column(String(36),ForeignKey("warehouse_addresses.id", ondelete="CASCADE"),nullable=False)
+    order = relationship("Order",back_populates="warehouse_addresses")
+    warehouse_address = relationship("WareHouseAddress")
