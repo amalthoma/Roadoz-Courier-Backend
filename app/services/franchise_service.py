@@ -108,7 +108,7 @@ async def create_franchise(db: AsyncSession, data: FranchiseCreate) -> Franchise
 
         preferred_service_area=data.preferred_service_area,
         nearby_landmark=data.nearby_landmark,
-        pin_codes_covered=data.pin_codes_covered,
+        pincode=data.pincode,
 
         doc_id_proof=data.doc_id_proof,
         doc_address_proof=data.doc_address_proof,

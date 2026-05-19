@@ -45,6 +45,7 @@ async def register_user(payload: RegisterRequest,db: AsyncSession = Depends(get_
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    print("USER SAVED:", user.id)
     return {
         "message": "User registered successfully",
         "user_id": user.id

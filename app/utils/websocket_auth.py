@@ -11,8 +11,4 @@ async def verify_websocket_token(token: str):
             "user_id": payload.get("user_id"),
             "user_type": payload.get("user_type")}
     except JWTError:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Token"
-        )
+        raise HTTPException(status_code=401,detail="Invalid Token")

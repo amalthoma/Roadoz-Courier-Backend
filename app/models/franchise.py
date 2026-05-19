@@ -85,7 +85,8 @@ class Franchise(Base):
     # Area
     preferred_service_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nearby_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    pin_codes_covered: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # pin_codes_covered: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pincode: Mapped[str] = mapped_column(String(6), nullable=False)
 
     # Documents
     doc_id_proof: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
@@ -141,3 +142,16 @@ class Franchise(Base):
     @property
     def mobile_number(self) -> str | None:
         return self.phone
+    
+    
+ 
+
+class OrderFranchiseAddress(Base):
+
+    __tablename__ = "order_franchise_addresses"
+
+    id: Mapped[str] = mapped_column(String(36),primary_key=True,default=lambda: str(uuid.uuid4()))
+    order_id: Mapped[str] = mapped_column(String(36),ForeignKey("orders.id", ondelete="CASCADE"),nullable=False)
+    franchise_address_id: Mapped[str] = mapped_column(String(36),ForeignKey("franchises.id", ondelete="CASCADE"),nullable=False)
+    order = relationship("Order",back_populates="franchise_addresses")
+    franchise_address = relationship("Franchise")    
