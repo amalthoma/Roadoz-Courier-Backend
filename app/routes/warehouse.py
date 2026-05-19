@@ -1,6 +1,6 @@
 # app/api/routes/warehouse.py
 
-from fastapi import APIRouter, Depends,HTTPException
+from fastapi import APIRouter, Depends,HTTPException,status,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -9,8 +9,8 @@ from app.services.warehouse_service import create_warehouse, get_all_warehouses
 from app.models.user import User
 from app.dependencies.role_checker import get_current_user
 from app.models.warehouse import WareHouseAddress
-from sqlalchemy import select
-from datetime import datetime
+from sqlalchemy import select,and_
+from datetime import datetime,time
 
 router = APIRouter(prefix="/warehouse", tags=["Warehouse"])
 
@@ -73,3 +73,86 @@ async def update_address(address_id: str,data: WarehouseAddressUpdate,db: AsyncS
     await db.refresh(address)
 
     return address
+
+
+
+
+
+
+@router.delete("/delete-warehouse-address/{warehouse_address_id}")
+async def delete_warehouse_address(
+    warehouse_address_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(WareHouseAddress).where(WareHouseAddress.id == warehouse_address_id))
+    warehouse_address = result.scalar_one_or_none()
+    if not warehouse_address:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Warehouse address not found")
+    if warehouse_address.user_id != str(current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You are not authorized to delete this warehouse address")
+
+    await db.delete(warehouse_address)
+    await db.commit()
+    return {
+        "success": True,
+        "message": "Warehouse address deleted successfully"
+    }
+    
+    
+    
+
+@router.get("/warehouse-addresses")
+async def get_warehouse_addresses(
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    name: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    query = select(WareHouseAddress).where(
+        WareHouseAddress.user_id == str(current_user.id)
+    )
+
+    filters = []
+    if name:
+        filters.append(
+            (
+                WareHouseAddress.contact_name.ilike(f"%{name}%")
+            ) |
+            (
+                WareHouseAddress.nickname.ilike(f"%{name}%")))
+    if start_date:
+        start_datetime = datetime.combine(datetime.strptime(start_date, "%Y-%m-%d").date(),time.min)
+        filters.append(WareHouseAddress.created_at >= start_datetime)
+    if end_date:
+        end_datetime = datetime.combine(datetime.strptime(end_date, "%Y-%m-%d").date(),time.max)
+        filters.append(WareHouseAddress.created_at <= end_datetime)
+    if filters:
+        query = query.where(and_(*filters))
+    query = query.order_by(WareHouseAddress.created_at.desc())
+    result = await db.execute(query)
+    warehouse_addresses = result.scalars().all()
+    return {
+        "success": True,
+        "count": len(warehouse_addresses),
+        "data": [
+            {
+                "id": warehouse.id,
+                "nickname": warehouse.nickname,
+                "contact_name": warehouse.contact_name,
+                "phone": warehouse.phone,
+                "email": warehouse.email,
+                "address_line_1": warehouse.address_line_1,
+                "address_line_2": warehouse.address_line_2,
+                "pincode": warehouse.pincode,
+                "city": warehouse.city,
+                "state": warehouse.state,
+                "country": warehouse.country,
+                "created_at": warehouse.created_at,
+            }
+            for warehouse in warehouse_addresses
+        ]
+    }    
