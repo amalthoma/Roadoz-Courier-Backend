@@ -736,7 +736,9 @@ async def get_pincode_from_gps(
     consignee = order.consignee
     warehouse_mappings = order.warehouse_addresses
     franchise_mappings = order.franchise_addresses
-
+    existing = await db.execute(select(ConsigneeToDelivery).where(ConsigneeToDelivery.order_id == order.id))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Already delivered") 
     if not pickup:
         raise HTTPException(status_code=404, detail="Pickup not found")
     if not consignee:
@@ -782,9 +784,11 @@ async def get_pincode_from_gps(
             break
 
     if matched_warehouse:
-        existing = await db.execute(select(WarehouseToDelivery).where(WarehouseToDelivery.order_id == order.id))
-        
-        
+        existing = await db.execute(select(WarehouseToDelivery).where(WarehouseToDelivery.pincode ==gps_pincode,WarehouseToDelivery.order_id == order.id))
+        # if existing.scalar_one_or_none():
+        existing_data = existing.scalars().first()
+        if existing_data:    
+            raise HTTPException(status_code=409, detail="Warehouse already done")
         status = build_order_warehousestatus(warehouse_mappings, warehouse_index)
         entry = WarehouseToDelivery(pincode=matched_warehouse.pincode,status=status,order_id=order.id,warehouse_addresses_id=matched_warehouse.id,user_id=current_user.id)
         db.add(entry)
@@ -825,8 +829,10 @@ async def get_pincode_from_gps(
             break
     print('matched_franchise  ',matched_franchise)    
     if matched_franchise:
-        existing = await db.execute(select(FranchiseToDelivery).where(FranchiseToDelivery.order_id == order.id))
-        
+        existing = await db.execute(select(FranchiseToDelivery).where(FranchiseToDelivery.pincode == gps_pincode,FranchiseToDelivery.order_id == order.id))
+        existing_data = existing.scalars().first()
+        if existing_data:    
+            raise HTTPException(status_code=409, detail="Franchise already done")
         status = build_order_franchisestatus(franchise_mappings, franchise_index)
         entry = FranchiseToDelivery(pincode=matched_franchise.pincode,status=status,order_id=order.id,franchise_addresses_id=matched_franchise.id,user_id=current_user.id)
         db.add(entry)
@@ -894,6 +900,10 @@ async def get_pincode_from_gps(
                 OrderWarehouseAddress.warehouse_address_id == global_warehouse.id))
         
         existing_mapping = existing_mapping_stmt.scalar_one_or_none()
+        existing = await db.execute(select(WarehouseToDelivery).where(WarehouseToDelivery.order_id == order.id,WarehouseToDelivery.pincode == gps_pincode))
+        existing_data = existing.scalars().first()
+        if existing_data:
+            raise HTTPException(status_code=409, detail="Warehouse already done")
         if not existing_mapping:
             new_mapping = OrderWarehouseAddress(order_id=order.id,warehouse_address_id=global_warehouse.id)
             db.add(new_mapping)
@@ -940,6 +950,10 @@ async def get_pincode_from_gps(
                 OrderFranchiseAddress.order_id == order.id,
                 OrderFranchiseAddress.franchise_address_id == global_franchise.id))
         existing_mapping = existing_mapping_stmt.scalar_one_or_none()
+        existing = await db.execute(select(FranchiseToDelivery).where(FranchiseToDelivery.pincode == gps_pincode,FranchiseToDelivery.order_id == order.id))
+        existing_data = existing.scalars().first()
+        if existing_data:
+            raise HTTPException(status_code=409, detail="Franchise already done")
         if not existing_mapping:
             new_mapping = OrderFranchiseAddress(order_id=order.id,franchise_address_id=global_franchise.id)
             db.add(new_mapping)
