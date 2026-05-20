@@ -9,10 +9,10 @@ from sqlalchemy import select, func, or_, delete, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.franchise import Franchise
+from app.models.franchise import Franchise,OrderFranchiseAddress
 from app.models.pickup_address import PickupAddress
 from app.models.consignee import Consignee
-from app.models.warehouse import WareHouseAddress
+from app.models.warehouse import WareHouseAddress,OrderWarehouseAddress
 from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder
 from app.models.role import Role
 from app.models.user_role import UserRole
@@ -536,9 +536,28 @@ async def create_order(
     ).scalar_one_or_none()
     if not consignee:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Consignee not found")
-    warehouse_addresses= (
-        await db.execute(select(WareHouseAddress).where(WareHouseAddress.id == data.warehouse_addresses_id))
-    ).scalar_one_or_none()
+    
+    
+    warehouse_addresses = []
+    for warehouse_id in data.warehouse_addresses_ids:
+        warehouse = (await db.execute(select(WareHouseAddress).where(WareHouseAddress.id == warehouse_id))).scalar_one_or_none()
+        warehouse_addresses.append(warehouse) 
+    
+    
+    franchise_addresses = []
+    for franchise_id in data.franchise_addresses_ids:
+        franchise = (await db.execute(select(Franchise).where(Franchise.id == franchise_id))).scalar_one_or_none()
+        franchise_addresses.append(franchise) 
+        
+               
+           
+    # warehouse_addresses= (
+    #     await db.execute(select(WareHouseAddress).where(WareHouseAddress.id == data.warehouse_addresses_id))
+    # ).scalar_one_or_none()
+    
+    
+    
+    
     # if not warehouse_addresses:
     #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Warehouse not found")
 
@@ -552,7 +571,6 @@ async def create_order(
         order_type=data.order_type.value,
         pickup_address_id=data.pickup_address_id,
         consignee_id=data.consignee_id,
-        warehouse_addresses_id=data.warehouse_addresses_id,
         payment_method=data.payment_method.value,
         cod_amount=data.cod_amount,
         to_pay_amount=data.to_pay_amount,
@@ -561,12 +579,26 @@ async def create_order(
         gst_number=data.gst_number,
         eway_bill_number=data.eway_bill_number,
         status=OrderStatus.PROCESSING,
+        previous_status=OrderStatus.PROCESSING,
         created_by=current_user.id,
         franchise_id=franchise_id,
     )
+    
+    
     db.add(order)
     await db.flush()
-
+    
+    
+    for warehouse in warehouse_addresses:
+        warehouse_map = OrderWarehouseAddress(order_id=order.id,warehouse_address_id=warehouse.id)
+        db.add(warehouse_map)
+    
+    for franchise in franchise_addresses:
+        franchise_map = OrderFranchiseAddress(order_id=order.id,franchise_address_id=franchise.id)
+        db.add(franchise_map)
+        
+        
+        
     # Add items
     for item_data in data.items:
         item = OrderItem(
