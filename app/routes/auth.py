@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.auth import (
@@ -24,14 +24,14 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: LoginRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     """
     Unified login endpoint for Super Admin and Franchise users.
 
     - **Super Admin**: provide email + password only.
     - **Franchise**: provide email + password + franchise_code.
     """
-    return await authenticate_user(db, request)
+    return await authenticate_user(db, request, http_request)
 
 
 @router.post("/role", response_model=RoleCheckResponse)
@@ -40,7 +40,7 @@ async def get_role(request: RoleCheckRequest, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshTokenRequest):
+async def refresh_token(request: RefreshTokenRequest, http_request: Request):
     """Exchange a valid refresh token for a new access + refresh token pair."""
     payload = verify_refresh_token(request.refresh_token)
     if not payload:
@@ -48,6 +48,9 @@ async def refresh_token(request: RefreshTokenRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         )
+    
+    # Store user_id in http_request.state for ActivityLoggingMiddleware
+    http_request.state.user_id = payload["user_id"]
     token_data = {
         "user_id": payload["user_id"],
         "email": payload["email"],

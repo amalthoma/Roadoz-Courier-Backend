@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 from app.models.user import User
 from app.models.franchise import Franchise
 from app.models.user_role import UserRole
@@ -36,7 +36,7 @@ async def _resolve_franchise(db: AsyncSession, user: User, role_name: str | None
     return None
 
 
-async def authenticate_user(db: AsyncSession, request: LoginRequest) -> TokenResponse:
+async def authenticate_user(db: AsyncSession, request: LoginRequest, http_request: Request = None) -> TokenResponse:
     """Unified login with classic RBAC role+permissions context."""
 
     result = await db.execute(select(User).where(User.email == request.email))
@@ -108,6 +108,9 @@ async def authenticate_user(db: AsyncSession, request: LoginRequest) -> TokenRes
             franchise_code=franchise.franchise_code,
             name=franchise.name,
         )
+
+    if http_request:
+        http_request.state.user_id = user.id
 
     return TokenResponse(
         access_token=create_access_token(token_data),

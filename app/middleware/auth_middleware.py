@@ -136,6 +136,9 @@ class ActivityLoggingMiddleware(BaseHTTPMiddleware):
                 if payload:
                     user_id = payload.get("user_id")
             
+            if not user_id and hasattr(request.state, "user_id"):
+                user_id = request.state.user_id
+            
             try:
                 async with AsyncSessionLocal() as db:
                     log = ActivityLog(
