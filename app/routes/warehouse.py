@@ -37,7 +37,7 @@ async def create_warehouse_route(
 
 @router.get("/getall/")
 async def list_warehouses(
-    search: Optional[str] = Query(None,description="Search by nickname / contact name / phone / pincode"),
+    name: Optional[str] = Query(None,description="Search by nickname / contact name / phone / pincode"),
     nickname: Optional[str] = Query(None,description="Filter by warehouse nickname"),
     pincode: Optional[str] = Query(None,description="Filter by warehouse pincode"),
     start_date: Optional[date] = Query(None,description="Start date"),
@@ -50,15 +50,15 @@ async def list_warehouses(
     filters = []
     filters.append(WareHouseAddress.user_id == current_user.id)
 
-    if search:
+    if name:
         filters.append(
             or_(
-                WareHouseAddress.nickname.ilike(f"%{search}%"),
-                WareHouseAddress.contact_name.ilike(f"%{search}%"),
-                WareHouseAddress.phone.ilike(f"%{search}%"),
-                WareHouseAddress.pincode.ilike(f"%{search}%"),
-                WareHouseAddress.city.ilike(f"%{search}%"),
-                WareHouseAddress.state.ilike(f"%{search}%"),))
+                WareHouseAddress.nickname.ilike(f"%{name}%"),
+                WareHouseAddress.contact_name.ilike(f"%{name}%"),
+                WareHouseAddress.phone.ilike(f"%{name}%"),
+                WareHouseAddress.pincode.ilike(f"%{name}%"),
+                WareHouseAddress.city.ilike(f"%{name}%"),
+                WareHouseAddress.state.ilike(f"%{name}%"),))
     if nickname:
         filters.append(WareHouseAddress.nickname.ilike(f"%{nickname}%"))
     if pincode:
@@ -87,7 +87,7 @@ async def list_warehouses(
             "has_prev": page > 1,
         },
         "filters": {
-            "search": search,
+            "name": name,
             "nickname": nickname,
             "pincode": pincode,
             "start_date": start_date,
