@@ -19,7 +19,7 @@ async def get_pincode_details(db: AsyncSession, pincode: str) -> PincodeServicea
     # If the pincode is not in our DB, we instantly query the Indian Postal API, 
     # learn its State and City, and cache it in our DB permanently!
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(f"https://api.postalpincode.in/pincode/{pincode}", timeout=5.0)
             data = response.json()
             
