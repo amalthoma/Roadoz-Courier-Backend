@@ -54,12 +54,9 @@ class BulkOrder(Base):
         String(36), ForeignKey("franchises.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), onupdate=datetime.utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=indian_time)
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=indian_time)
 
     orders = relationship("Order", back_populates="bulk_order", lazy="selectin")
 
@@ -86,7 +83,7 @@ class Order(Base):
     
     franchise_addresses = relationship("OrderFranchiseAddress",back_populates="order",cascade="all, delete-orphan",lazy="selectin")
 
-
+    bag_orders = relationship("BagOrder", back_populates="order",cascade="all, delete-orphan", lazy="selectin")
     # Payment
     payment_method: Mapped[str] = mapped_column(String(20), nullable=False)  # COD | Prepaid | To Pay
     cod_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # required when COD
@@ -120,8 +117,6 @@ class Order(Base):
     #             nullable=False,
     #             default=OrderStatus.PROCESSING
     #         )
-
-    # Ownership
     created_by: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -142,6 +137,45 @@ class Order(Base):
     packages = relationship("OrderPackage", back_populates="order", cascade="all, delete-orphan", lazy="selectin")
     pickup_address = relationship("PickupAddress", lazy="selectin")
     consignee = relationship("Consignee", lazy="selectin")
+    
+    
+    
+    
+
+    
+    
+    
+class Bag(Base):
+    __tablename__ = "bags"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    bag_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    barcode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'Processing'"))
+    pincode: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
+    total_orders: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    
+    created_by: Mapped[str] = mapped_column(String(36),ForeignKey("users.id", ondelete="RESTRICT"),nullable=False,index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=indian_time, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=indian_time, onupdate=indian_time, nullable=False)
+    bag_orders = relationship("BagOrder",back_populates="bag",cascade="all, delete-orphan",lazy="selectin")
+    
+    
+class BagOrder(Base):
+    __tablename__ = "bag_orders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    bag_id: Mapped[str] = mapped_column(String(36),ForeignKey("bags.id", ondelete="CASCADE"),nullable=False,index=True)
+    order_id: Mapped[str] = mapped_column(String(36),ForeignKey("orders.id", ondelete="CASCADE"),nullable=False,index=True)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime, default=indian_time, nullable=False)
+
+
+    bag = relationship("Bag", back_populates="bag_orders")
+    order = relationship("Order", back_populates="bag_orders")   
+    
+    
 
 
 class OrderItem(Base):

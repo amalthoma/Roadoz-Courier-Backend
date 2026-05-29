@@ -4,6 +4,9 @@ import logging
 import csv
 from datetime import datetime
 from fastapi import Depends
+from collections import defaultdict
+
+
 
 from app.core.database import get_db
 from app.dependencies.role_checker import get_current_user, require_permission
@@ -16,7 +19,7 @@ from app.models.franchise import Franchise,OrderFranchiseAddress
 from app.models.pickup_address import PickupAddress
 from app.models.consignee import Consignee
 from app.models.warehouse import WareHouseAddress,OrderWarehouseAddress
-from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder
+from app.models.order import Order, OrderItem, OrderPackage, OrderStatus, BulkOrder,Bag,BagOrder
 from app.models.role import Role
 from app.models.user_role import UserRole
 from app.services.wallet_service import debit_for_order
@@ -175,6 +178,18 @@ async def _resolve_franchise_id(db: AsyncSession, user: User) -> str | None:
         return user.franchise_id
     franchise = await _get_franchise_for_user(db, user.id)
     return franchise.id if franchise else None
+
+
+
+async def generate_bag_number(db, pincode: str):
+    count = await db.execute(
+        select(func.count(Bag.id)).where(Bag.bag_number.like(f"BAG-{pincode}-%"))
+    )
+    seq = count.scalar() + 1
+
+    return f"BAG-{pincode}-{seq:04d}"
+
+
 
 
 async def _generate_order_number(db: AsyncSession) -> str:
@@ -678,16 +693,17 @@ async def create_order(
     return _build_order_out(order)
 
 
+
 async def process_bulk_excel_upload(
-    db: AsyncSession, 
-    file_content: bytes, 
+    db: AsyncSession,
+    file_content: bytes,
     file_name: str,
-    order_type: str, 
-    pickup_address_id: str, 
+    order_type: str,
+    pickup_address_id: str,
     current_user: User
 ) -> BulkOrderResponse:
+
     franchise_id = await _resolve_franchise_id(db, current_user)
-    
     bulk_order = BulkOrder(
         id=str(uuid.uuid4()),
         file_name=file_name,
@@ -699,148 +715,131 @@ async def process_bulk_excel_upload(
     )
     db.add(bulk_order)
     await db.flush()
-
     if file_name.lower().endswith(".csv"):
         decoded = file_content.decode("utf-8-sig")
         csv_rows = list(csv.reader(decoded.splitlines()))
-        if not csv_rows:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV file is empty.")
-        headers = [str(value).strip().lower() if value else "" for value in csv_rows[0]]
+        headers = [h.strip().lower() for h in csv_rows[0]]
         data_rows = csv_rows[1:]
     else:
         wb = openpyxl.load_workbook(filename=BytesIO(file_content), data_only=True)
         sheet = wb.active
-        headers = [str(cell.value).strip().lower() if cell.value else "" for cell in sheet[1]]
+        headers = [c.value.strip().lower() if c.value else "" for c in sheet[1]]
         data_rows = list(sheet.iter_rows(min_row=2, values_only=True))
-    
-    col_map = {
-        "consignee_name": headers.index("consignee_name") if "consignee_name" in headers else -1,
-        "mobile": headers.index("mobile") if "mobile" in headers else -1,
-        "email": headers.index("email") if "email" in headers else -1,
-        "address_line_1": headers.index("address_line_1") if "address_line_1" in headers else -1,
-        "pincode": headers.index("pincode") if "pincode" in headers else -1,
-        "city": headers.index("city") if "city" in headers else -1,
-        "state": headers.index("state") if "state" in headers else -1,
-        "payment_method": headers.index("payment_method") if "payment_method" in headers else -1,
-        "cod_amount": headers.index("cod_amount") if "cod_amount" in headers else -1,
-        "to_pay_amount": headers.index("to_pay_amount") if "to_pay_amount" in headers else -1,
-        "rov": headers.index("rov") if "rov" in headers else -1,
-        "order_value": headers.index("order_value") if "order_value" in headers else -1,
-        "product_name": headers.index("product_name") if "product_name" in headers else -1,
-        "sku": headers.index("sku") if "sku" in headers else -1,
-        "unit_price": headers.index("unit_price") if "unit_price" in headers else -1,
-        "qty": headers.index("qty") if "qty" in headers else -1,
-        "length_cm": headers.index("length_cm") if "length_cm" in headers else -1,
-        "breadth_cm": headers.index("breadth_cm") if "breadth_cm" in headers else -1,
-        "height_cm": headers.index("height_cm") if "height_cm" in headers else -1,
-        "physical_weight_kg": headers.index("physical_weight_kg") if "physical_weight_kg" in headers else -1,
-    }
-
+    col_map = {name: headers.index(name) if name in headers else -1 for name in headers}
     errors = []
+    success_orders = []
     success_count = 0
-
     for idx, row in enumerate(data_rows, start=2):
         try:
             if not any(row):
                 continue
-            
-            async with db.begin_nested():
-                def get_val(key, default=None):
-                    if col_map[key] != -1 and col_map[key] < len(row) and row[col_map[key]] is not None:
-                        return row[col_map[key]]
-                    return default
+            def get_val(key, default=None):
+                i = col_map.get(key, -1)
+                if i != -1 and i < len(row):
+                    return row[i]
+                return default
+            mobile = str(get_val("mobile", ""))
+            pincode = str(get_val("pincode", ""))
+            stmt = select(Consignee).where(Consignee.mobile == mobile,Consignee.pincode == pincode)
+            result = await db.execute(stmt)
+            consignee = result.scalars().first()
 
-                consignee_mobile = str(get_val("mobile", "")).strip()
-                consignee_name = str(get_val("consignee_name", "")).strip()
-                consignee_email = get_val("email")
-                if consignee_email:
-                    consignee_email = consignee_email.strip()
-
-                # Check if consignee already exists
-                query = select(Consignee).where(
-                    and_(
-                        Consignee.mobile == consignee_mobile,
-                        Consignee.name == consignee_name
-                    )
-                )
-                if franchise_id:
-                    query = query.where(Consignee.franchise_id == franchise_id)
-                else:
-                    query = query.where(Consignee.user_id == current_user.id)
-
-                existing_consignee = (await db.execute(query)).scalars().first()
-
-                if existing_consignee:
-                    consignee_id = existing_consignee.id
-                else:
-                    consignee_data = ConsigneeCreate(
-                        name=consignee_name,
-                        mobile=consignee_mobile,
-                        email=consignee_email,
+            if not consignee:
+                consignee = await create_consignee(
+                    db,
+                    ConsigneeCreate(
+                        name=str(get_val("consignee_name", "")),
+                        mobile=mobile,
+                        email=get_val("email"),
                         address_line_1=str(get_val("address_line_1", "")),
-                        pincode=str(get_val("pincode", "")),
+                        pincode=pincode,
                         city=str(get_val("city", "")),
                         state=str(get_val("state", ""))
-                    )
-                    consignee_out = await create_consignee(db, consignee_data, current_user)
-                    consignee_id = consignee_out.id
-                
-                payment_method = _normalize_order_payment_method(str(get_val("payment_method", "Prepaid")))
-                order_data = OrderCreate(
-                    order_type=order_type,
-                    pickup_address_id=pickup_address_id,
-                    consignee_id=consignee_id,
-                    payment_method=payment_method,
-                    cod_amount=float(get_val("cod_amount") or 0) if payment_method == "COD" else None,
-                    to_pay_amount=float(get_val("to_pay_amount") or 0) if payment_method == "To Pay" else None,
-                    rov=_normalize_order_rov(str(get_val("rov", "owner_risk"))),
-                    order_value=float(get_val("order_value") or 0),
-                    items=[
-                        {
-                            "product_name": str(get_val("product_name", "Product")),
-                            "sku": get_val("sku"),
-                            "unit_price": float(get_val("unit_price") or 0),
-                            "qty": int(get_val("qty") or 1),
-                            "total": float(get_val("unit_price") or 0) * int(get_val("qty") or 1)
-                        }
-                    ],
-                    packages=[
-                        {
-                            "count": 1,
-                            "length_cm": float(get_val("length_cm") or 1),
-                            "breadth_cm": float(get_val("breadth_cm") or 1),
-                            "height_cm": float(get_val("height_cm") or 1),
-                            "vol_weight_kg": (float(get_val("length_cm") or 1) * float(get_val("breadth_cm") or 1) * float(get_val("height_cm") or 1)) / 5000,
-                            "physical_weight_kg": float(get_val("physical_weight_kg") or 1)
-                        }
-                    ],
-                    shipping_charge=0 
+                    ),
+                    current_user
                 )
-                
-                order_out = await create_order(db, order_data, current_user)
-                
-                # Update bulk_order_id directly
-                order = await db.get(Order, order_out.id)
-                order.bulk_order_id = bulk_order.id
-                
+            consignee_id = consignee.id
+            payment_method = _normalize_order_payment_method(str(get_val("payment_method", "Prepaid")))
+            order_data = OrderCreate(
+                order_type=order_type,
+                pickup_address_id=pickup_address_id,
+                consignee_id=consignee_id,
+                payment_method=payment_method,
+                cod_amount=float(get_val("cod_amount") or 0) if payment_method == "COD" else None,
+                to_pay_amount=float(get_val("to_pay_amount") or 0) if payment_method == "To Pay" else None,
+                rov=_normalize_order_rov(str(get_val("rov", "owner_risk"))),
+                order_value=float(get_val("order_value") or 0),
+                items=[{
+                    "product_name": str(get_val("product_name", "Product")),
+                    "sku": get_val("sku"),
+                    "unit_price": float(get_val("unit_price") or 0),
+                    "qty": int(get_val("qty") or 1),
+                    "total": float(get_val("unit_price") or 0) * int(get_val("qty") or 1)
+                }],
+                packages=[{
+                    "count": 1,
+                    "length_cm": float(get_val("length_cm") or 1),
+                    "breadth_cm": float(get_val("breadth_cm") or 1),
+                    "height_cm": float(get_val("height_cm") or 1),
+                    "vol_weight_kg": (
+                        float(get_val("length_cm") or 1) *
+                        float(get_val("breadth_cm") or 1) *
+                        float(get_val("height_cm") or 1)
+                    ) / 5000,
+                    "physical_weight_kg": float(get_val("physical_weight_kg") or 1)
+                }],
+                shipping_charge=0
+            )
+            order_out = await create_order(db, order_data, current_user)
+            order = await db.get(Order, order_out.id)
+            order.bulk_order_id = bulk_order.id
+            success_orders.append(order)
             success_count += 1
-                
         except Exception as exc:
-            logger.error(f"Row {idx} failed: {str(exc)}")
             errors.append(BulkOrderError(index=idx, error=str(exc)))
+    from collections import defaultdict
+    grouped_orders = defaultdict(list)
+    for order in success_orders:
+        grouped_orders[order.consignee.pincode].append(order)
+    for pincode, orders in grouped_orders.items():
+        bag_number = await generate_bag_number(db, pincode)
+        bag = Bag(
+            id=str(uuid.uuid4()),
+            bag_number=bag_number,
+            pincode=pincode,
+            barcode=generate_barcode_base64(bag_number),
+            status="Processing",
+            total_orders=len(orders),
+            created_by=current_user.id)
+        db.add(bag)
+        await db.flush()
 
+        for order in orders:
+            db.add(BagOrder(
+                bag_id=bag.id,
+                order_id=order.id))
     bulk_order.total_orders = success_count + len(errors)
     bulk_order.successful_orders = success_count
     bulk_order.failed_orders = len(errors)
-    bulk_order.status = "Completed" if len(errors) == 0 else "Completed Errors"
-    
+    bulk_order.status = "Completed" if not errors else "Completed with Errors"
+
     await db.commit()
     await db.refresh(bulk_order)
-    
+
     return BulkOrderResponse(
         bulk_order=BulkOrderOut.model_validate(bulk_order),
         errors=errors
     )
+
+
+
+
+
+
+
+
+
+
 
 
 async def list_bulk_orders(
@@ -1812,7 +1811,7 @@ async def get_order_counts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),):
     total_query = select(func.count(Order.id))
-    status_query = (select(Order.status,func.count(Order.id)).group_by(Order.status))
+    status_query = (select(func.lower(Order.status),func.count(Order.id)).group_by(func.lower(Order.status)))
     if current_user.role_name != "super_admin":
         franchise_id = await _resolve_franchise_id(db,current_user)
         if franchise_id:
@@ -1822,10 +1821,11 @@ async def get_order_counts(
     result = await db.execute(status_query)
     rows = result.all()
     status_counts = {
-        status.value: 0 for status in OrderStatus
+        status.value.lower(): 0 for status in OrderStatus
     }
     for status, count in rows:
         key = status.value if hasattr(status, "value") else status
+        key = key.lower() 
         status_counts[key] = count
     return {
         "total_orders": total_orders or 0,
