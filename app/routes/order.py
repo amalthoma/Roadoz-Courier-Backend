@@ -2535,6 +2535,7 @@ async def get_today_status_orders(
                 # =================================================
 
                 "consignee": {
+                    "id": order.consignee.id if order.consignee else None,
                     "name": order.consignee.name if order.consignee else None,
                     "mobile": order.consignee.mobile if order.consignee else None,
                     "pincode": order.consignee.pincode if order.consignee else None,
@@ -2547,6 +2548,7 @@ async def get_today_status_orders(
                 # =================================================
 
                 "pickup": {
+                    "id": order.pickup_address.id if order.pickup_address else None,
                     "name": order.pickup_address.contact_name if order.pickup_address else None,
                     "nickname": order.pickup_address.nickname if order.pickup_address else None,
                     "phone": order.pickup_address.phone if order.pickup_address else None,
@@ -3044,15 +3046,11 @@ async def get_date_wise_all_status(
     
    
 
-
-class TodayStatusRequest(BaseModel):
-    date: date
-    status: str
-
+from app.schemas.order import TodayStatusRequestDatewise
 
 @router.post("/orders/date-wise-status-address")
 async def get_date_wise_status_address(
-    payload: TodayStatusRequest,
+    payload: TodayStatusRequestDatewise,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: User = Depends(require_permission("orders:view")),
@@ -3068,17 +3066,11 @@ async def get_date_wise_status_address(
 
     selected_date = payload.date
     selected_status = payload.status.strip()
-
     parts = selected_status.split("_")
     base_status = parts[0]
     has_suffix = len(parts) > 1
 
     addresses = []
-
-    # =========================================================
-    # PICKED STATUS
-    # =========================================================
-
     if base_status == "Picked":
 
         filters = [
