@@ -13,6 +13,11 @@ class OrderType(str, Enum):
     INTERNATIONAL = "International"
 
 
+class TodayStatusRequestDatewise(BaseModel):
+    date: date
+    status: str
+
+
 class PaymentMethod(str, Enum):
     COD = "COD"
     PREPAID = "Prepaid"
