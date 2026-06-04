@@ -300,7 +300,10 @@ async def search_pickup_addresses(
     addresses = result.scalars().all()
     return PickupAddressListResponse(
         items=[PickupAddressOut.model_validate(a) for a in addresses],
-        total=total,page=page,limit=limit,total_pages=(total + limit - 1) // limit,)
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=(total + limit - 1) // limit,)
 
 
 
