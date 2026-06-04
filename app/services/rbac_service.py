@@ -484,6 +484,7 @@ async def update_user(
         )
 
     is_global = not current_user.franchise_id and not await _get_franchise_for_owner(db, current_user.id)
+    caller_role = await _get_caller_role_name(db, current_user.id)
     if caller_role == "franchise":
         franchise = await _get_franchise_for_owner(db, current_user.id)
         if not franchise:
@@ -529,6 +530,7 @@ async def delete_user(
         )
 
     is_global = not current_user.franchise_id and not await _get_franchise_for_owner(db, current_user.id)
+    caller_role = await _get_caller_role_name(db, current_user.id)
     if caller_role == "franchise":
         franchise = await _get_franchise_for_owner(db, current_user.id)
         if not franchise:
