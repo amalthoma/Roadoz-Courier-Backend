@@ -15,6 +15,7 @@ from app.routes import auth, franchise, orderreview,projectreview , profile, web
 from app.middleware.auth_middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware, ActivityLoggingMiddleware
 from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration,notification
 from app.routes import auth, franchise, profile, websocket, rbac, order, wallet, remittance, invoice,warehouse, activity_log,consigeeauth,coningeereview,webconfiguration, analytics,user_admincommunication, rate_calculator, reports, prints, operations
+from app.routes import bulk_order, bag
 from app.models.activity_log import ActivityLog
 from app.middleware.maintenance_middleware import MaintenanceMiddleware
 
@@ -326,6 +327,8 @@ app.include_router(rate_calculator.router,prefix=API_PREFIX)
 app.include_router(reports.router,prefix=API_PREFIX)
 app.include_router(prints.router,prefix=API_PREFIX)
 app.include_router(operations.router,prefix=API_PREFIX)
+app.include_router(bulk_order.router,prefix=API_PREFIX)
+app.include_router(bag.router,prefix=API_PREFIX)
 
 
 @app.get("/", tags=["Health"])
