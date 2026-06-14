@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
-from app.schemas.order import PickupAddressOut, ConsigneeOut
+from app.schemas.order import PickupAddressOut, ConsigneeOut, OrderItemOut, OrderPackageOut
 
 
 class InvoiceStatus(str, Enum):
@@ -25,6 +25,8 @@ class InvoiceOrderDetails(BaseModel):
     created_at: datetime
     pickup_address: PickupAddressOut
     consignee: ConsigneeOut
+    items: List[OrderItemOut] = []
+    packages: List[OrderPackageOut] = []
 
     model_config = {"from_attributes": True}
 
