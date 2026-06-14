@@ -1,5 +1,3 @@
-# app/api/routes/warehouse.py
-
 from fastapi import APIRouter, Depends,HTTPException,status,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,7 +55,8 @@ async def list_warehouses(
     db: AsyncSession = Depends(get_db),
 
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("warehouse:view")),
+
+    _: User = Depends(require_permission("warehouse:view"))
 ):
 
     offset = (page - 1) * limit
@@ -89,26 +88,12 @@ async def list_warehouses(
             func.date(WareHouseAddress.created_at) <= end_date
         )
 
-    franchise_id = current_user.franchise_id
-    is_global = False
-    
-    if not franchise_id:
-        from app.models.franchise import Franchise
-        franchise = (await db.execute(select(Franchise).where(Franchise.user_id == current_user.id))).scalar_one_or_none()
-        if franchise:
-            franchise_id = franchise.id
-        else:
-            is_global = True
-
-    if not is_global:
-        if franchise_id:
-            filters.append(WareHouseAddress.franchise_id == franchise_id)
-        else:
-            filters.append(WareHouseAddress.user_id == str(current_user.id))
-
+    stmt = select(WareHouseAddress)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+        
     stmt = (
-        select(WareHouseAddress)
-        .where(and_(*filters))
+        stmt
         .order_by(WareHouseAddress.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -118,11 +103,9 @@ async def list_warehouses(
 
     warehouses = result.scalars().all()
 
-    count_stmt = (
-        select(func.count())
-        .select_from(WareHouseAddress)
-        .where(and_(*filters))
-    )
+    count_stmt = select(func.count()).select_from(WareHouseAddress)
+    if filters:
+        count_stmt = count_stmt.where(and_(*filters))
 
     total_result = await db.execute(count_stmt)
 
@@ -191,7 +174,8 @@ async def get_address_by_id(
     pincode: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("warehouse:view"))):
+    _: User = Depends(require_permission("warehouse:view"))
+    ):
     result = await db.execute(select(WareHouseAddress).where(WareHouseAddress.pincode == pincode))
     addresses = result.scalars().all()
     if not addresses:
@@ -203,12 +187,24 @@ async def get_address_by_id(
 
 
 @router.patch("/update/{address_id}", response_model=WarehouseAddressResponse)
-async def update_address(address_id: str,data: WarehouseAddressUpdate,db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("warehouse:edit"))):
+async def update_address(
+    address_id: str,
+    data: WarehouseAddressUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_permission("warehouse:edit"))
+):
     result = await db.execute(select(WareHouseAddress).where(WareHouseAddress.id == address_id))
     address = result.scalar_one_or_none()
     if not address:
         raise HTTPException(status_code=404, detail="Address not found")
     update_data = data.dict(exclude_unset=True)
+    
+    if "pincode" in update_data and update_data["pincode"] != address.pincode:
+        existing_warehouse = await db.execute(select(WareHouseAddress).where(WareHouseAddress.pincode == update_data["pincode"]))
+        if existing_warehouse.scalars().first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Warehouse with this pincode already exists")
+
     for key, value in update_data.items():
         setattr(address, key, value)
     address.updated_at = datetime.utcnow()
@@ -227,7 +223,7 @@ async def delete_warehouse_address(
     warehouse_address_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("warehouse:delete")),
+    _: User = Depends(require_permission("warehouse:delete"))
 ):
     result = await db.execute(
         select(WareHouseAddress).where(WareHouseAddress.id == warehouse_address_id))
@@ -248,7 +244,6 @@ async def get_warehouse_addresses(
     name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: User = Depends(require_permission("warehouse:view")),
 ):
 
     franchise_id = current_user.franchise_id
