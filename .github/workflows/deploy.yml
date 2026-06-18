@@ -21,8 +21,8 @@ jobs:
             cd ~/Roadoz-Courier-Backend
             git pull origin staging
             source venv/bin/activate
-            pip install -r requirements.txt -q
-            pip install --upgrade "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --quiet --no-deps
+            grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+            python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
             sudo systemctl restart roadoz
             sudo systemctl is-active roadoz
 
@@ -40,7 +40,7 @@ jobs:
             cd ~/Roadoz-Courier-Backend
             git pull origin main
             source venv/bin/activate
-            pip install -r requirements.txt -q
-            pip install --upgrade "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --quiet --no-deps
+            grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+            python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
             sudo systemctl restart roadoz
             sudo systemctl is-active roadoz
