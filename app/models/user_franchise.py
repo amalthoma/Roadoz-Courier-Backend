@@ -15,14 +15,6 @@ class FranchiseApplicationbyUser(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     
-    # Auth User reference (who applied)
-    auth_user_id: Mapped[str] = mapped_column(
-        String(36), 
-        ForeignKey("auth_users.id", ondelete="CASCADE"), 
-        nullable=False, 
-        index=True
-    )
-    
     # Application Status
     status: Mapped[str] = mapped_column(
         String(20), 
@@ -99,7 +91,6 @@ class FranchiseApplicationbyUser(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"))
     
     # Relationships
-    auth_user = relationship("AuthUser", foreign_keys=[auth_user_id])
     approver = relationship("User", foreign_keys=[approved_by])
     
     @property
