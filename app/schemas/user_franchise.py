@@ -11,51 +11,50 @@ class FranchiseApplicationStatus(str, Enum):
 
 # ── Franchise Application Create ──────────────────────────────────────────
 
-class FranchiseApplicationCreate(BaseModel):
-    full_name: str = Field(..., max_length=100)
-    email: EmailStr
-    phone: str = Field(..., max_length=20)
-    date_of_birth: Optional[date] = None
-    gender: Optional[str] = Field(None, max_length=20)
-    current_address: Optional[str] = Field(None, max_length=500)
-    permanent_address: Optional[str] = Field(None, max_length=500)
+# class FranchiseApplicationCreate(BaseModel):
+#     full_name: str = Field(..., max_length=100)
+#     email: EmailStr
+#     phone: str = Field(..., max_length=20)
+#     date_of_birth: Optional[date] = None
+#     gender: Optional[str] = Field(None, max_length=20)
+#     current_address: Optional[str] = Field(None, max_length=500)
+#     permanent_address: Optional[str] = Field(None, max_length=500)
     
-    proposed_location: Optional[str] = Field(None, max_length=255)
-    ownership_type: Optional[str] = Field(None, max_length=20)
-    detailed_business_address: Optional[str] = Field(None, max_length=500)
-    prior_experience: Optional[str] = Field(None, max_length=500)
-    years_active: Optional[int] = None
+#     proposed_location: Optional[str] = Field(None, max_length=255)
+#     ownership_type: Optional[str] = Field(None, max_length=20)
+#     detailed_business_address: Optional[str] = Field(None, max_length=500)
+#     prior_experience: Optional[str] = Field(None, max_length=500)
+#     years_active: Optional[int] = None
     
-    office_space_sqft: Optional[int] = None
-    office_ownership: Optional[str] = Field(None, max_length=20)
-    staff_count: Optional[int] = None
-    internet_availability: bool = False
-    computer_laptop: bool = False
+#     office_space_sqft: Optional[int] = None
+#     office_ownership: Optional[str] = Field(None, max_length=20)
+#     staff_count: Optional[int] = None
+#     internet_availability: bool = False
+#     computer_laptop: bool = False
     
-    investment_capacity: Optional[str] = Field(None, max_length=100)
-    source_of_funds: Optional[str] = Field(None, max_length=255)
-    bank_name: Optional[str] = Field(None, max_length=255)
-    account_number: Optional[str] = Field(None, max_length=50)
-    existing_loans: bool = False
-    existing_loan_details: Optional[str] = Field(None, max_length=1000)
+#     investment_capacity: Optional[str] = Field(None, max_length=100)
+#     source_of_funds: Optional[str] = Field(None, max_length=255)
+#     bank_name: Optional[str] = Field(None, max_length=255)
+#     account_number: Optional[str] = Field(None, max_length=50)
+#     existing_loans: bool = False
+#     existing_loan_details: Optional[str] = Field(None, max_length=1000)
     
-    preferred_service_area: Optional[str] = Field(None, max_length=255)
-    nearby_landmark: Optional[str] = Field(None, max_length=255)
-    pincode: str = Field(..., max_length=6)
+#     preferred_service_area: Optional[str] = Field(None, max_length=255)
+#     nearby_landmark: Optional[str] = Field(None, max_length=255)
+#     pincode: str = Field(..., max_length=6)
     
-    doc_id_proof: bool = False
-    doc_address_proof: bool = False
-    doc_photographs: bool = False
-    doc_business_registration: bool = False
-    doc_bank_statement: bool = False
+#     doc_id_proof: bool = False
+#     doc_address_proof: bool = False
+#     doc_photographs: bool = False
+#     doc_business_registration: bool = False
+#     doc_bank_statement: bool = False
     
-    agree_to_terms: bool = False
-    submission_place: Optional[str] = Field(None, max_length=255)
-    submission_date: Optional[date] = None
+#     agree_to_terms: bool = False
+#     submission_place: Optional[str] = Field(None, max_length=255)
+#     submission_date: Optional[date] = None
 
 class FranchiseApplicationResponse(BaseModel):
     id: str
-    auth_user_id: str
     status: str
     full_name: str
     email: str

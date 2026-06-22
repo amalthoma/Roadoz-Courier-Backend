@@ -16,8 +16,8 @@ from app.schemas.consigeeauth import (
     PhoneRegisterRequest,
     SendOTPRequestByphone,
     VerifyOTPRequestByphone
-    
 )
+
 from datetime import datetime, timedelta    
 import random
 
@@ -32,11 +32,6 @@ router = APIRouter(prefix="/email-auth",tags=["User Email Authentication"])
     
 @router.post("/register")
 async def register_user(payload: RegisterRequest,db: AsyncSession = Depends(get_db)):
-
-    result = await db.execute(select(Consignee).where(Consignee.email == payload.email))
-    consignee = result.scalar_one_or_none()
-    if not consignee:
-        raise HTTPException(status_code=400,detail="User does not find ")
     result = await db.execute(select(AuthUser).where(AuthUser.email == payload.email))
     existing_user = result.scalar_one_or_none()
     if existing_user:

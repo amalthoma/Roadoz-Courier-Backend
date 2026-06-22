@@ -9,193 +9,227 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_password_hash
 from app.models.user_franchise import FranchiseApplicationbyUser
-from app.schemas.user_franchise import FranchiseApplicationCreate,FranchiseApplicationResponse,FranchiseApplicationListResponse,FranchiseApplicationStatus,FranchiseApplicationUpdateStatus,FranchiseCreateFromApplication,FranchiseCreateResponse
+from app.schemas.user_franchise import FranchiseApplicationResponse,FranchiseApplicationListResponse,FranchiseApplicationStatus,FranchiseApplicationUpdateStatus,FranchiseCreateFromApplication,FranchiseCreateResponse
 from app.models.consigeeauth import AuthUser
 from app.models.franchise import Franchise
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
 from app.services.franchise_service import _generate_franchise_code
-
-UPLOAD_DIR = "uploads/franchise_documents"
-
-async def create_franchise_application(
-    db: AsyncSession, 
-    data: FranchiseApplicationCreate, 
-    auth_user_id: str
-) -> FranchiseApplicationResponse:
-    """Create a new franchise application from AuthUser"""
-    
-    # Check if auth user exists
-    auth_user = await db.execute(
-        select(AuthUser).where(AuthUser.id == auth_user_id)
-    )
-    auth_user = auth_user.scalar_one_or_none()
-    if not auth_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Auth user not found"
-        )
-    
-    # Check if application already exists for this auth user
-    existing_app = await db.execute(
-        select(FranchiseApplicationbyUser).where(
-            and_(
-                FranchiseApplicationbyUser.auth_user_id == auth_user_id,
-                FranchiseApplicationbyUser.status.in_(["pending", "on_hold"])
-            )
-        )
-    )
-    if existing_app.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already have a pending application"
-        )
-    
-    # Check if franchise already exists for this email or pincode
-    existing_franchise = await db.execute(
-        select(Franchise).where(
-            or_(
-                Franchise.email == data.email,
-                Franchise.pincode == data.pincode
-            )
-        )
-    )
-    if existing_franchise.scalar_one_or_none():
-        # Check if it's the same pincode
-        pincode_match = await db.execute(
-            select(Franchise).where(Franchise.pincode == data.pincode)
-        )
-        if pincode_match.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"A franchise already exists for pincode {data.pincode}"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered with a franchise"
-        )
-    
-    # Create application
-    application = FranchiseApplicationbyUser(
-        id=str(uuid.uuid4()),
-        auth_user_id=auth_user_id,
-        status="pending",
-        full_name=data.full_name,
-        email=data.email,
-        phone=data.phone,
-        date_of_birth=data.date_of_birth,
-        gender=data.gender,
-        current_address=data.current_address,
-        permanent_address=data.permanent_address,
-        proposed_location=data.proposed_location,
-        ownership_type=data.ownership_type,
-        detailed_business_address=data.detailed_business_address,
-        prior_experience=data.prior_experience,
-        years_active=data.years_active,
-        office_space_sqft=data.office_space_sqft,
-        office_ownership=data.office_ownership,
-        staff_count=data.staff_count,
-        internet_availability=data.internet_availability,
-        computer_laptop=data.computer_laptop,
-        investment_capacity=data.investment_capacity,
-        source_of_funds=data.source_of_funds,
-        bank_name=data.bank_name,
-        account_number=data.account_number,
-        existing_loans=data.existing_loans,
-        existing_loan_details=data.existing_loan_details,
-        preferred_service_area=data.preferred_service_area,
-        nearby_landmark=data.nearby_landmark,
-        pincode=data.pincode,
-        doc_id_proof=data.doc_id_proof,
-        doc_address_proof=data.doc_address_proof,
-        doc_photographs=data.doc_photographs,
-        doc_business_registration=data.doc_business_registration,
-        doc_bank_statement=data.doc_bank_statement,
-        agree_to_terms=data.agree_to_terms,
-        submission_place=data.submission_place,
-        submission_date=data.submission_date or date.today(),
-    )
-    
-    db.add(application)
-    await db.commit()
-    await db.refresh(application)
-    
-    return FranchiseApplicationResponse.model_validate(application)
+from app.core.config import settings
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import aiosmtplib
 
 
-async def upload_application_document(
-    db: AsyncSession,
-    application_id: str,
-    document_type: str,
-    file: UploadFile,
-    current_auth_user: AuthUser
-) -> dict:
-    """Upload document for franchise application"""
+# async def send_email(to_email: str, subject: str, body: str):
+#     message = MIMEMultipart()
+#     message["From"] = f"Roadoz-Courier <{settings.SMTP_USERNAME}>"
+#     message["To"] = to_email
+#     message["Subject"] = subject
+#     message.attach(MIMEText(body, "plain"))
+#     try:
+#         await aiosmtplib.send(
+#             message,
+#             hostname=settings.SMTP_HOST,
+#             port=settings.SMTP_PORT,
+#             username=settings.SMTP_USERNAME,
+#             password=settings.SMTP_PASSWORD,
+#             start_tls=True
+#         )
+#         print("Email sent successfully")
+#     except Exception as e:
+#         print("Email error:", e)
+#         raise e
     
-    # Check if application exists
-    app = await db.execute(
-        select(FranchiseApplicationbyUser).where(FranchiseApplicationbyUser.id == application_id)
+
+
+
+
+
+async def send_email(to_email: str, subject: str, body: str):
+    message = MIMEMultipart()
+    message["From"] = f"Roadoz Courier <{settings.SMTP_FROM}>"
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.attach(
+        MIMEText(body, "plain")
     )
-    app = app.scalar_one_or_none()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-    
-    # Check if application is pending
-    if app.status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot upload documents for {app.status} application"
+    try:
+        smtp = aiosmtplib.SMTP(
+            hostname=settings.SMTP_HOST,
+            port=settings.SMTP_PORT,
+            start_tls=True
         )
-    
-    # Create upload directory if not exists
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    
-    # Generate filename
-    file_extension = file.filename.split(".")[-1] if file.filename else "pdf"
-    filename = f"{application_id}_{document_type}.{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
-    
-    # Save file
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Update application with file path
-    field_map = {
-        "aadhar": "aadhar_file_path",
-        "pan": "pan_file_path",
-        "photo": "photo_file_path",
-        "business_registration": "business_registration_file_path",
-        "bank_statement": "bank_statement_file_path",
-    }
-    
-    if document_type not in field_map:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid document type. Allowed: {list(field_map.keys())}"
+        await smtp.connect()
+        await smtp.login(
+            settings.SMTP_USERNAME,
+            settings.SMTP_PASSWORD
         )
+        await smtp.send_message(message)
+        await smtp.quit()
+        print("EMAIL SENT SUCCESSFULLY")
+        return True
+
+    except Exception as e:
+        print("SMTP ERROR:", e)
+        return False
     
-    setattr(app, field_map[document_type], file_path)
     
-    # Mark document as submitted
-    doc_check_map = {
-        "aadhar": "doc_id_proof",
-        "pan": "doc_id_proof",
-        "photo": "doc_photographs",
-        "business_registration": "doc_business_registration",
-        "bank_statement": "doc_bank_statement",
-    }
-    if document_type in doc_check_map:
-        setattr(app, doc_check_map[document_type], True)
+        
     
-    await db.commit()
-    await db.refresh(app)
     
-    return {
-        "success": True,
-        "message": f"{document_type} uploaded successfully",
-        "file_path": file_path
-    }
+    
+# UPLOAD_DIR = "uploads/franchise_documents"
+
+# async def create_franchise_application(
+#     db: AsyncSession, 
+#     data: FranchiseApplicationCreate, 
+# ) -> FranchiseApplicationResponse:
+#     """Create a new franchise application from AuthUser"""
+    
+#     # Check if franchise already exists for this email or pincode
+#     existing_franchise = await db.execute(
+#         select(Franchise).where(
+#             or_(
+#                 Franchise.email == data.email,
+#                 Franchise.pincode == data.pincode
+#             )
+#         )
+#     )
+#     if existing_franchise.scalar_one_or_none():
+#         # Check if it's the same pincode
+#         pincode_match = await db.execute(
+#             select(Franchise).where(Franchise.pincode == data.pincode)
+#         )
+#         if pincode_match.scalar_one_or_none():
+#             raise HTTPException(
+#                 status_code=status.HTTP_400_BAD_REQUEST,
+#                 detail=f"A franchise already exists for pincode {data.pincode}"
+#             )
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Email already registered with a franchise"
+#         )
+    
+#     # Create application
+#     application = FranchiseApplicationbyUser(
+#         id=str(uuid.uuid4()),
+#         status="pending",
+#         full_name=data.full_name,
+#         email=data.email,
+#         phone=data.phone,
+#         date_of_birth=data.date_of_birth,
+#         gender=data.gender,
+#         current_address=data.current_address,
+#         permanent_address=data.permanent_address,
+#         proposed_location=data.proposed_location,
+#         ownership_type=data.ownership_type,
+#         detailed_business_address=data.detailed_business_address,
+#         prior_experience=data.prior_experience,
+#         years_active=data.years_active,
+#         office_space_sqft=data.office_space_sqft,
+#         office_ownership=data.office_ownership,
+#         staff_count=data.staff_count,
+#         internet_availability=data.internet_availability,
+#         computer_laptop=data.computer_laptop,
+#         investment_capacity=data.investment_capacity,
+#         source_of_funds=data.source_of_funds,
+#         bank_name=data.bank_name,
+#         account_number=data.account_number,
+#         existing_loans=data.existing_loans,
+#         existing_loan_details=data.existing_loan_details,
+#         preferred_service_area=data.preferred_service_area,
+#         nearby_landmark=data.nearby_landmark,
+#         pincode=data.pincode,
+#         doc_id_proof=data.doc_id_proof,
+#         doc_address_proof=data.doc_address_proof,
+#         doc_photographs=data.doc_photographs,
+#         doc_business_registration=data.doc_business_registration,
+#         doc_bank_statement=data.doc_bank_statement,
+#         agree_to_terms=data.agree_to_terms,
+#         submission_place=data.submission_place,
+#         submission_date=data.submission_date or date.today(),
+#     )
+    
+#     db.add(application)
+#     await db.commit()
+#     await db.refresh(application)
+    
+#     return FranchiseApplicationResponse.model_validate(application)
+
+
+# async def upload_application_document(
+#     db: AsyncSession,
+#     application_id: str,
+#     document_type: str,
+#     file: UploadFile,
+# ) -> dict:
+#     """Upload document for franchise application"""
+    
+#     # Check if application exists
+#     app = await db.execute(
+#         select(FranchiseApplicationbyUser).where(FranchiseApplicationbyUser.id == application_id)
+#     )
+#     app = app.scalar_one_or_none()
+#     if not app:
+#         raise HTTPException(status_code=404, detail="Application not found")
+    
+#     # Check if application is pending
+#     if app.status != "pending":
+#         raise HTTPException(
+#             status_code=400,
+#             detail=f"Cannot upload documents for {app.status} application"
+#         )
+    
+#     # Create upload directory if not exists
+#     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+#     # Generate filename
+#     file_extension = file.filename.split(".")[-1] if file.filename else "pdf"
+#     filename = f"{application_id}_{document_type}.{file_extension}"
+#     file_path = os.path.join(UPLOAD_DIR, filename)
+    
+#     # Save file
+#     with open(file_path, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+    
+#     # Update application with file path
+#     field_map = {
+#         "aadhar": "aadhar_file_path",
+#         "pan": "pan_file_path",
+#         "photo": "photo_file_path",
+#         "business_registration": "business_registration_file_path",
+#         "bank_statement": "bank_statement_file_path",
+#     }
+    
+#     if document_type not in field_map:
+#         raise HTTPException(
+#             status_code=400,
+#             detail=f"Invalid document type. Allowed: {list(field_map.keys())}"
+#         )
+    
+#     setattr(app, field_map[document_type], file_path)
+    
+#     # Mark document as submitted
+#     doc_check_map = {
+#         "aadhar": "doc_id_proof",
+#         "pan": "doc_id_proof",
+#         "photo": "doc_photographs",
+#         "business_registration": "doc_business_registration",
+#         "bank_statement": "doc_bank_statement",
+#     }
+#     if document_type in doc_check_map:
+#         setattr(app, doc_check_map[document_type], True)
+    
+#     await db.commit()
+#     await db.refresh(app)
+    
+#     return {
+#         "success": True,
+#         "message": f"{document_type} uploaded successfully",
+#         "file_path": file_path
+#     }
 
 
 async def approve_franchise_application(
@@ -325,6 +359,27 @@ async def approve_franchise_application(
         
         await db.commit()
         await db.refresh(franchise)
+        
+        email_body = f"""
+        Hello {app.full_name},
+        Your Roadoz Courier franchise application has been approved successfully.
+        Your account has been created.
+        Login Details:
+        Email:
+        {app.email}
+        Password:
+        {data.password}
+        Franchise Code:
+        {franchise.franchise_code}
+        Thank you,
+        Roadoz Courier Team
+        """
+        await send_email(
+            to_email=app.email,
+            subject="Roadoz Courier Franchise Approved - Login Details",
+            body=email_body
+        )
+                
         
         return FranchiseCreateResponse(
             success=True,
