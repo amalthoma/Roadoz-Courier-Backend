@@ -1,41 +1,60 @@
-name: Deploy Roadoz Backend
+name: Deploy
 
 on:
   push:
     branches:
       - main
+      - staging
 
 jobs:
-  deploy:
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Deploy to Staging
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 15.207.220.194
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/Roadoz-Courier-Backend
+            git fetch origin staging
+            CHANGED=$(git diff HEAD origin/staging -- requirements.txt | wc -l)
+            git pull origin staging
+            source venv/bin/activate
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "requirements.txt changed, running pip install..."
+              grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+              python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
+            else
+              echo "requirements.txt unchanged, skipping pip install."
+            fi
+            sudo systemctl restart roadoz
+            sudo systemctl is-active roadoz
 
-    - name: Deploy to EC2 via SSH
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_KEY }}
-        script: |
-          set -e
-          cd /home/ubuntu/Roadoz-Courier-Backend
-          git pull origin main
-          chmod +x deploy.sh
-          ./deploy.sh
-
-    - name: Telegram Success Message
-      if: success()
-      run: |
-        curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-        -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-        -d text="✅ Roadoz Deployment SUCCESS"
-
-    - name: Telegram Failure Message
-      if: failure()
-      run: |
-        curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-        -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-        -d text="❌ Roadoz Deployment FAILED"
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 52.66.93.248
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/Roadoz-Courier-Backend
+            git fetch origin main
+            CHANGED=$(git diff HEAD origin/main -- requirements.txt | wc -l)
+            git pull origin main
+            source venv/bin/activate
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "requirements.txt changed, running pip install..."
+              grep -v "aiomysql" requirements.txt | pip install -r /dev/stdin -q
+              python -c "import aiomysql; exit(0 if not aiomysql.__version__.startswith('0.2') else 1)" || pip install "aiomysql @ git+https://github.com/aio-libs/aiomysql.git@1aa9cfcba" --no-deps -q
+            else
+              echo "requirements.txt unchanged, skipping pip install."
+            fi
+            sudo systemctl restart roadoz
+            sudo systemctl is-active roadoz
