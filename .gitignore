@@ -85,3 +85,11 @@ dist/
 docker-compose.override.yml
 
 /alembic
+
+# Uploaded files
+media/
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.pdf
