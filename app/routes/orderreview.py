@@ -11,7 +11,7 @@ from app.dependencies.role_checker import get_current_user, require_permission
 from app.models.user import User
 
 
-router = APIRouter(prefix="/reviews", tags=["Order Reviews"])
+router = APIRouter(prefix="/reviews", tags=["Order Reviews for remove "])
 
 
 @router.post("/createreviews", response_model=ReviewResponseSchema)

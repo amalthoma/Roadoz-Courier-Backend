@@ -16,8 +16,7 @@ from app.models.warehouse import WareHouseAddress, OrderWarehouseAddress
 from app.models.franchise import Franchise, OrderFranchiseAddress
 from app.schemas.consigeeuserorder import PickupAddressResponse,ConsigneeResponse,WarehouseAddressResponse,FranchiseAddressResponse,ItemResponse,PackageResponse,WeightSummaryResponse,OrderListResponse,PaginatedOrdersResponse
 from app.routes.order import PickupToConsignees,WarehouseToDelivery,FranchiseToDelivery,ConsigneeToDelivery
-
-
+from app.models.consigeereview import ProductReview, ReviewStatus
 
 
 
@@ -312,6 +311,7 @@ async def get_order_detail(
         selectinload(Order.warehouse_addresses).selectinload(OrderWarehouseAddress.warehouse_address),
         selectinload(Order.franchise_addresses).selectinload(OrderFranchiseAddress.franchise_address),
         selectinload(Order.bag_orders).selectinload(BagOrder.bag),
+        selectinload(Order.product_reviews).selectinload(ProductReview.consignee)
     )
     
     result = await db.execute(query)
@@ -632,7 +632,24 @@ async def get_order_detail(
             "vol_weight_kg": float(package.vol_weight_kg),
             "physical_weight_kg": float(package.physical_weight_kg)
         })
+        
     
+    # ========== PRODUCT REVIEWS ==========
+    response["product_reviews"] = []
+    if order.product_reviews:
+        for review in order.product_reviews:
+            if review.status == ReviewStatus.APPROVED:
+                response["product_reviews"].append({
+                    "id": review.id,
+                    "review": review.review,
+                    "rating": review.rating,
+                    "admin_comment":review.admin_comment if review.admin_comment else None,
+                    "created_at": review.created_at,
+                    "formatted_date": review.created_at.strftime("%d %b %Y, %I:%M %p") if review.created_at else None,
+                    "consignee_name": review.consignee.name if review.consignee else None,
+                    "consignee_email": review.consignee.email if review.consignee else None
+                })    
+        
     # Weight summary
     response["weight_summary"] = {
         "applicable_weight_kg": float(order.applicable_weight_kg),

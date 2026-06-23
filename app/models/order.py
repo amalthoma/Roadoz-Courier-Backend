@@ -138,7 +138,7 @@ class Order(Base):
     packages = relationship("OrderPackage", back_populates="order", cascade="all, delete-orphan", lazy="selectin")
     pickup_address = relationship("PickupAddress", lazy="selectin")
     consignee = relationship("Consignee", lazy="selectin")
-    
+    product_reviews  = relationship("ProductReview",back_populates="order", lazy="selectin")
     
     
     
