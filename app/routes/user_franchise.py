@@ -30,26 +30,6 @@ import uuid
 router = APIRouter(prefix="/franchise-applications", tags=["Franchise Applications"])
 
 
-# @router.post("", response_model=FranchiseApplicationResponse, status_code=201)
-# async def create_application(
-#     data: FranchiseApplicationCreate,
-#     db: AsyncSession = Depends(get_db),
-# ):
-#     """Create a new franchise application (Auth User)"""
-#     return await create_franchise_application(db, data)
-
-
-# @router.post("/{application_id}/upload/{document_type}")
-# async def upload_document(
-#     application_id: str,
-#     document_type: str,
-#     file: UploadFile = File(...),
-#     db: AsyncSession = Depends(get_db),
-# ):
-#     """Upload document for franchise application (Admin only)"""
-#     return await upload_application_document(db, application_id, document_type, file)
-
-
 UPLOAD_DIR = "uploads/franchise_documents"
 ALLOWED_DOCUMENT_TYPES = {
     "aadhar": {"field": "aadhar_file_path", "doc_check": "doc_id_proof"},
