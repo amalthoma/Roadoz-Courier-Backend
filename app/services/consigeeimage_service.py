@@ -6,7 +6,6 @@ from fastapi import UploadFile, HTTPException, status
 from datetime import datetime
 import uuid
 from PIL import Image
-import magic
 
 class LocalImageService:
     UPLOAD_DIR = "uploads/consigeeprofilimage"
