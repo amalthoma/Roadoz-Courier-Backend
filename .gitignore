@@ -57,6 +57,7 @@ htmlcov/
 # FastAPI / Uvicorn
 # =========================
 *.pid
+smtp_test.py
 
 # =========================
 # Migrations (Alembic)
