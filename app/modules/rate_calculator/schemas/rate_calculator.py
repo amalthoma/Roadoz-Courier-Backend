@@ -18,6 +18,7 @@ class PaymentMode(str, Enum):
     COD = "COD"
     PREPAID = "PREPAID"
     TO_PAY = "TO_PAY"
+    CREDIT = "CREDIT"
 
 
 class RiskType(str, Enum):
