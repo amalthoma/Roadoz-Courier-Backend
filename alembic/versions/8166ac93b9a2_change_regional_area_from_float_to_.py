@@ -1,8 +1,8 @@
-"""initial migration
+"""Change regional_area from float to string
 
-Revision ID: f943fcc61fd0
-Revises: 
-Create Date: 2026-06-26 14:41:37.642967
+Revision ID: 8166ac93b9a2
+Revises: dfebfaee7342
+Create Date: 2026-06-26 12:33:17.174835
 
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = 'f943fcc61fd0'
-down_revision: Union[str, None] = None
+revision: str = '8166ac93b9a2'
+down_revision: Union[str, None] = 'dfebfaee7342'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
