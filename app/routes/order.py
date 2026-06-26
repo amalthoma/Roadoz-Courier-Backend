@@ -32,6 +32,7 @@ from app.schemas.order import (
     LocationRequest,
     OrderStatusListResponse,
     OrderUpdate,
+    ManualFreightUpdate,
     
 
 )
@@ -4816,5 +4817,37 @@ async def get_order_revenue_report(
         generated_at=indian_time().isoformat()
     )
 
-
+@router.patch("/{order_id}/freight", response_model=OrderOut)
+async def update_manual_freight(
+    order_id: str,
+    data: ManualFreightUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("orders_edit"))
+):
+    """
+    Update freight charges manually for an order (e.g., when physical weight exceeds 30kg).
+    """
+    result = await db.execute(
+        select(Order).where(Order.id == order_id).options(
+            selectinload(Order.pickup_address),
+            selectinload(Order.consignee),
+            selectinload(Order.items),
+            selectinload(Order.packages),
+        )
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+        
+    order.freight_charge = data.freight_charge
+    order.freight_gst = round(data.freight_charge * 0.18, 2)
+    order.total_freight = order.freight_charge + order.freight_gst
+    order.is_manual_freight = True
+    order.manual_freight_reason = data.reason
     
+    await db.commit()
+    await db.refresh(order)
+    return order
